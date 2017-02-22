@@ -1,5 +1,8 @@
 import array
 
+MAXRAM = 0x1000
+MAXSTACK = 0x0010 
+
 class datamem():
     def __init__(self, maxram):
         self.maxram = maxram
@@ -38,7 +41,7 @@ class datamem():
 
     def __getitem__(self, address):
         bank, location, linear = self.translate(address)
-        print(hex(bank), hex(location), hex(linear))
+        #print(hex(bank), hex(location), hex(linear))
         if location < 0x20:
             return self.sfr[bank * 0x20 + location]
         else:
@@ -46,7 +49,7 @@ class datamem():
 
     def __setitem__(self, address, value):
         bank, location, linear = self.translate(address)
-        print(hex(bank), hex(location), hex(linear))
+        #print(hex(bank), hex(location), hex(linear))
         if location < 0x20:
             self.sfr[bank * 0x20 + location] = value
         else:
