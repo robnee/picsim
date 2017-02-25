@@ -50,7 +50,8 @@ enhmid = [
     ('SUBLW', 'k', 'Subtract W from literal', '1', '11 1100 kkkk kkkk', 'C,DC,Z', ''),
     ('ADDWFC', 'f,d', 'Add with Carry W and f', '1', '11 1101 dfff ffff', 'C,DC,Z', '2'),
     ('ADDLW', 'k', 'Add literal and W', '1', '11 1110 kkkk kkkk', 'C,DC,Z', ''),
-    ('MOVIW', 'k[n]', 'Move INDFn to W, Indexed Indirect.', '1', '11 1111 0nkk kkkk', 'Z', '2,3'),
-    ('MOVWI', 'k[n]', 'Move W to INDFn, Indexed Indirect.', '1', '11 1111 lnkk kkkk', '', '2')
+    ('MOVIW', 'n mm', 'Move Indirect FSRn to W with pre/post inc/dec', '1', '00 0000 0001 0nmm', 'Z', '2,3'),
+    ('MOVIW', 'k[n]', 'Move INDFn to W, Indexed Indirect', '1', '11 1111 0nkk kkkk', 'Z', '2,3'),
+    ('MOVWI', 'n mm', 'Move W to Indirect FSRn with pre/post inc/dec', '1', '00 0000 0001 1nmm', '', '2'),
+    ('MOVWI', 'k[n]', 'Move W to INDFn, Indexed Indirect', '1', '11 1111 lnkk kkkk', '', '2')
 ]
-

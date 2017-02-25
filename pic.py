@@ -18,7 +18,7 @@ class pic:
 
         # program counter high byte
         self.pch = 0
-        
+
         self.init_ins_info(ins_table)
 
     def init_ins_info(self, ins_table):
@@ -37,13 +37,13 @@ class pic:
             ins.opcode_mask = rec[4].replace(' ', '')
 
             # break opcode mask into bit spans for each field for decoding later
-            m = re.match('([01]+)x*(b*)(d*)(f*)(n*)(k*)', ins.opcode_mask)
+            m = re.match('([01]+)x*(b*)(d*)(f*)(n*)(m*)(k*)', ins.opcode_mask)
 
             # build a dict of fields and their spand
             ins.opcode = m.group(1)
             ins.field_spans = tuple(m.span(i + 1) for i in range(len(ins.field_list)))
 
-            self.ins_ref[rec[0]] = ins
+            self.ins_ref[ins.opcode] = ins
 
 #        for k in sorted(self.ins_ref):
 #            i= self.ins_ref[k]
@@ -51,33 +51,33 @@ class pic:
 
     def clear(self):
         # special function registers
-        self.progmem = [0 for i in range(MAXROM)]
+        self.prog = [0 for i in range(MAXROM)]
         
     def decode(self, word):
-        ''' return a tuple of opcode, b, d, f, n, k '''
+        ''' return a tuple of opcode, b, d, f, n, m, k '''
 
         # convert program word to a bit string
         bits = '{:014b}'.format(word)
 
         # lookup matching instruction
-        for mnemonic in self.ins_ref:
-            ins = self.ins_ref[mnemonic]
-            #print(mnemonic, ins.opcode_mask, ins.opcode)
+        for opcode in self.ins_ref:
+            ins = self.ins_ref[opcode]
+            #print(ins.mnemonic, ins.opcode_mask, ins.opcode)
             if bits.startswith(ins.opcode):
                 #print(mnemonic, ins.opcode, ins.field_spans, bits)
-                return (mnemonic,) + tuple(bits[span[0]:span[1]] for span in ins.field_spans)
+                return (ins.mnemonic,) + tuple(bits[span[0]:span[1]] for span in ins.field_spans)
 
-    def set_data(address, value):
+    def set_data(self, address, value):
         ''' handles writing to special locations '''
         if address < MAXRAM and address & 0x7F == PCL:
             self.set_pc((self.data[PCLATH] << 8) | value)
         else:
             self.data[address] = value
             
-    def get_pc():
+    def get_pc(self):
         return (self.pch << 8) | self.data[PCL]
         
-    def set_pc(address):
+    def set_pc(self, address):
         self.pch, self.data[PCL] = divmod(address, 0X100)
 
     def reset(self, cond=NOT_POR):
@@ -90,74 +90,75 @@ class pic:
             data[STATUS] = (1 << NOT_PD) | (1 << NOT_TO)  
 
     def run(self):
-        while True:
+        for _ in range(10):
             self.exec()
             
     def exec(self):
         ''' exec a single instruction '''
         
         self.pc = self.get_pc()
-        
-        word = self.prog[pc]
+ 
+        word = self.prog[self.pc]
         fields = self.decode(word)
+
+        self.set_pc(self.pc + 1)
         
-        self.set_pc(pc + 1)
-        
-        self.dispatch(opcode, fields)
+        print(self.format(self.pc, word))
+        #self.dispatch(opcode, fields)
         
     def dispatch(self, opcode, fields):
         return {
-            '1100010' : _addfsr,
-            '111110' : _addlw,
-            '000111' : _addwf,
-            '111101' : _addwfc,
-            '111001' : _andlw,
-            '000101' : _andwf,
-            '110111' : _asrf,
-            '0100' : _bcf,
-            '11001' : _bra,
-            '00000000001011' : _brw,
-            '0101' : _bsf,
-            '0110' : _btfsc,
-            '0111' : _btfss,
-            '100' : _call,
-            '00000000001010' : _callw,
-            '0000011' : _clrf,
-            '000001000000' : _clrw,
-            '00000001100100' : _clrwdt,
-            '001001' : _comf,
-            '000011' : _decf,
-            '001011' : _decfsz,
-            '101' : _goto,
-            '001010' : _incf,
-            '001111' : _incfsz,
-            '111000' : _iorlw,
-            '000100' : _iorwf,
-            '110101' : _lslf,
-            '110110' : _lsrf,
-            '001000' : _movf,
-            '1111110' : _moviw,
-            '000000001' : _movlb,
-            '1100011' : _movlp,
-            '110000' : _movlw,
-            '0000001' : _movwf,
-            '111111' : _movwi,
-            '00000000000000' : _nop,
-            '00000001100010' : _option,
-            '00000000000001' : _reset,
-            '00000000001001' : _retfie,
-            '110100' : _retlw,
-            '00000000001000' : _return,
-            '001101' : _rle,
-            '001100' : _rrf,
-            '00000001100011' : _sleep,
-            '111100' : _sublw,
-            '000010' : _subwf,
-            '111011' : _subwfb,
-            '001110' : _swapf,
-            '00000001100' : _tris,
-            '111010' : _xorlw,
-            '000110' : _xorwf,
+            '1100010': _addfsr,
+            '111110': _addlw,
+            '000111': _addwf,
+            '111101': _addwfc,
+            '111001': _andlw,
+            '000101': _andwf,
+            '110111': _asrf,
+            '0100': _bcf,
+            '11001': _bra,
+            '00000000001011': _brw,
+            '0101': _bsf,
+            '0110': _btfsc,
+            '0111': _btfss,
+            '100': _call,
+            '00000000001010': _callw,
+            '0000011': _clrf,
+            '000001000000': _clrw,
+            '00000001100100': _clrwdt,
+            '001001': _comf,
+            '000011': _decf,
+            '001011': _decfsz,
+            '101': _goto,
+            '001010': _incf,
+            '001111': _incfsz,
+            '111000': _iorlw,
+            '000100': _iorwf,
+            '110101': _lslf,
+            '110110': _lsrf,
+            '001000': _movf,
+            '1111110': _moviw,
+            '000000001': _movlb,
+            '1100011': _movlp,
+            '110000': _movlw,
+            '0000001': _movwf,
+            '111111': _movwi,
+            '00000000000000': _nop,
+            '00000001100010': _option,
+            '00000000000001': _reset,
+            '00000000001001': _retfie,
+            '110100': _retlw,
+            '00000000001000': _return,
+            '001101': _rle,
+            '001100': _rrf,
+            '00000001100011': _sleep,
+            '111100': _sublw,
+            '000010': _subwf,
+            '111011': _subwfb,
+            '001110': _swapf,
+            '00000001100': _tris,
+            '111010': _xorlw,
+            '000110': _xorwf,
         }[opcode](fields)
         
     # opcode implementations
@@ -316,17 +317,40 @@ class pic:
       
     def format(self, pc, word):
         fields = self.decode(word)
-        mnemonic, opcode, b, d, f, n, k = fields
+        mnemonic, opcode, b, d, f, n, m, k = fields
 
-        ins = self.ins_ref[mnemonic]
-    
-        return('{:04x}  {:8} {}'.format(pc, ins.mnemonic, f))
+        ins = self.ins_ref[opcode]
+ 
+        # format the optional bit field
+        sb = ', {}'.format(b) if len(b) else ''
+
+        # format the optional destination
+        if d == '0':
+            sd = ', W'
+        elif d == '1':
+            sd = ', F'
+        else:
+            sd = ''
+
+        if len(f) and len(d):
+            sd = 'W' if d == '0' else 'F'
+            return '{:04x}  {:10} 0x{:02x}, {}'.format(pc, ins.mnemonic, int(f, 2), sd)
+        elif len(f) and len(b):
+            return '{:04x}  {:10} 0x{:02x}, {}'.format(pc, ins.mnemonic, int(f, 2), b)
+        elif len(f):
+            return '{:04x}  {:10} 0x{:02x}'.format(pc, ins.mnemonic, int(f, 2))
+        elif len(n) and len(k):
+            return '{:04x}  {:10} FSR{}, 0x{:02x}'.format(pc, ins.mnemonic, n, int(k, 2))
+        elif len(k):
+            return '{:04x}  {:10} 0x{:02x}'.format(pc, ins.mnemonic, int(k, 2))
+        else:
+            return '{:04x}  {:10}'.format(pc, ins.mnemonic)
 
 
 class instruction_info:
     ''' info on an instruction '''
 
-    field_list = ['opcode', 'b', 'd', 'f', 'n', 'k']
+    field_list = ['opcode', 'b', 'd', 'f', 'n', 'm', 'k']
 
     def __init__(self, mnemonic):
         self.mnemonic = mnemonic
@@ -335,27 +359,33 @@ class instruction_info:
         self.cycles = None
         self.flags = None
 
+def test():
+    d = datamem(256)
+
+    d[0x7f] = 5
+    d[0xa5] = 4
+    d[STATUS] = 7
+
+    print(hex(0x50), d.translate(0x50))
+    print(hex(0x125), d.translate(0x125))
+    print(hex(0x1ff), d.translate(0x1ff), d[0x1ff])
+    print(hex(0xa5), d.translate(0xa5), d[0xa5])
+    print(hex(0x2055), d.translate(0x2055), d[0x2055])
+    print(hex(0x204f), d.translate(0x204f), d[0x204f])
+    print(hex(0x2050), d.translate(0x2050), d[0x2050])
 
 p = pic(insdata.enhmid)
 
 print(p.decode(0b00000001100001))
 print(p.decode(0b01100110011101))
 print(p.decode(0b00100110010110))
+print(p.decode(0b11111000100101))
 
 print(p.format(1, 0b00000001100001))
 print(p.format(2, 0b01100110011101))
 print(p.format(3, 0b00100110010110))
+print(p.format(4, 0b11111000100101))
+print(p.format(5, 0b11000101011011))
 
-d = datamem(256)
-
-d[0x7f] = 5
-d[0xa5] = 4
-d[STATUS] = 7
-
-print(hex(0x50), d.translate(0x50))
-print(hex(0x125), d.translate(0x125))
-print(hex(0x1ff), d.translate(0x1ff), d[0x1ff])
-print(hex(0xa5), d.translate(0xa5), d[0xa5])
-print(hex(0x2055), d.translate(0x2055), d[0x2055])
-print(hex(0x204f), d.translate(0x204f), d[0x204f])
-print(hex(0x2050), d.translate(0x2050), d[0x2050])
+p.clear()
+p.run()
