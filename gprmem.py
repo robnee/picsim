@@ -1,4 +1,4 @@
-class sfrmem():
+class SfrMem():
     def __init__(self:
         self.maxram = 0x20 * 0x20
         self.sfr = array.array('B')

@@ -9,41 +9,17 @@ from bitdef import *
 MAXROM = 0x800
 
 
-class pic:
-    def __init__(self, ins_table):
+class Pic:
+    def __init__(self, decoder):
         ''' init class with table of instruction set data '''
         self.prog = array.array('H')
-        self.data = datamem(256)
+        self.data = DataMem(256)
         self.clear()
 
         # program counter high byte
         self.pch = 0
 
-        self.init_ins_info(ins_table)
-
-    def init_ins_info(self, ins_table):
-        ''' parse instruction table and build lookup tables '''
-        self.ins_ref = {}
-
-        for rec in ins_table:
-            # create an instruction info instance
-            ins = instruction_info(rec[0])
-            ins.arg = rec[1]
-            ins.desc = rec[2]
-            ins.cycles = rec[3]
-            ins.flags = rec[5]
-
-            # get opcode mask and remove any whitespace added for readability
-            ins.opcode_mask = rec[4].replace(' ', '')
-
-            # break opcode mask into bit spans for each field for decoding later
-            m = re.match('([01]+)x*(b*)(d*)(f*)(n*)(m*)(k*)', ins.opcode_mask)
-
-            # build a dict of fields and their spand
-            ins.opcode = m.group(1)
-            ins.field_spans = tuple(m.span(i + 1) for i in range(len(ins.field_list)))
-
-            self.ins_ref[ins.opcode] = ins
+        self.decoder = decoder
 
 #        for k in sorted(self.ins_ref):
 #            i= self.ins_ref[k]
@@ -52,20 +28,10 @@ class pic:
     def clear(self):
         # special function registers
         self.prog = [0 for i in range(MAXROM)]
-        
-    def decode(self, word):
-        ''' return a tuple of opcode, b, d, f, n, m, k '''
 
-        # convert program word to a bit string
-        bits = '{:014b}'.format(word)
-
-        # lookup matching instruction
-        for opcode in self.ins_ref:
-            ins = self.ins_ref[opcode]
-            #print(ins.mnemonic, ins.opcode_mask, ins.opcode)
-            if bits.startswith(ins.opcode):
-                #print(mnemonic, ins.opcode, ins.field_spans, bits)
-                return (ins.mnemonic,) + tuple(bits[span[0]:span[1]] for span in ins.field_spans)
+    def load(self, address, words):
+        for i, word in enumerate(words):
+            self.prog[address + i] = word
 
     def set_data(self, address, value):
         ''' handles writing to special locations '''
@@ -92,7 +58,7 @@ class pic:
     def run(self):
         for _ in range(10):
             self.exec()
-            
+
     def exec(self):
         ''' exec a single instruction '''
         
@@ -105,6 +71,12 @@ class pic:
         
         print(self.format(self.pc, word))
         #self.dispatch(opcode, fields)
+
+    def decode(self, word):
+        return self.decoder.decode(word)
+        
+    def format(self, address, word):
+        return self.decoder.format(address, word)
         
     def dispatch(self, opcode, fields):
         return {
@@ -314,12 +286,88 @@ class pic:
 
     def _xorwf(self, fields):
         pass
-      
+  
+
+class InstructionInfo:
+    ''' info on an instruction '''
+
+    def __init__(self, mnemonic):
+        self.mnemonic = mnemonic
+        self.fields = None
+        self.desc = None
+        self.cycles = None
+        self.flags = None
+
+
+class Decoder:
+    ''' Decodes and encodes instructions from/to 14 bit program words'''
+    field_list = ['opcode', 'b', 'd', 'f', 'n', 'm', 'k']
+        
+    def __init__(self, data):
+        ''' parse instruction table and build lookup tables '''
+        self.table = {}
+
+        for rec in data:
+            # create an instruction info instance
+            ins = InstructionInfo(rec[0])
+            ins.arg = rec[1]
+            ins.desc = rec[2]
+            ins.cycles = rec[3]
+            ins.flags = rec[5]
+
+            # get opcode mask and remove any whitespace added for readability
+            ins.opcode_mask = rec[4].replace(' ', '')
+
+            # break opcode mask into bit spans for each field for decoding later
+            m = re.match('([01]+)x*(b*)(d*)(f*)(n*)(m*)(k*)', ins.opcode_mask)
+
+            # build a dict of fields and their spand
+            ins.opcode = m.group(1)
+            ins.field_spans = tuple(m.span(i + 1) for i in range(len(Decoder.field_list)))
+
+            self.table[ins.opcode] = ins
+
+    def decode(self, word):
+        ''' return a tuple of opcode, b, d, f, n, m, k '''
+
+        # convert program word to a bit string
+        bits = '{:014b}'.format(word)
+
+        # lookup matching instruction
+        for opcode in self.table:
+            ins = self.table[opcode]
+            #print(ins.mnemonic, ins.opcode_mask, ins.opcode)
+            if bits.startswith(ins.opcode):
+                #print(mnemonic, ins.opcode, ins.field_spans, bits)
+                return (ins.mnemonic,) + tuple(bits[span[0]:span[1]] for span in ins.field_spans)
+
+#        for k in sorted(self.ins_ref):
+#            i= self.ins_ref[k]
+#            print('    def _{}(self):\n        pass\n'.format(i.mnemonic.lower()))
+
+    def encode(self, mnemonic, **kwargs):
+        # find matching mnemonic in instruction table
+        for rec in self.table:
+            ins = self.table[rec]
+            if mnemonic.upper() == ins.mnemonic:
+                bits = ins.opcode
+                
+                # build instruction from fields starting after opcode
+                for i, field_name in enumerate(Decoder.field_list):
+                    if field_name in kwargs:
+                        x, y = ins.field_spans[i]
+                        bits += '{:0{}b}'.format(kwargs[field_name], y - x)
+                print(bits, int(bits, 2))
+                # convert from string to numeric
+                return int(bits, 2)
+                
+        raise ValueError()
+
     def format(self, pc, word):
         fields = self.decode(word)
         mnemonic, opcode, b, d, f, n, m, k = fields
 
-        ins = self.ins_ref[opcode]
+        ins = self.table[opcode]
  
         # format the optional bit field
         sb = ', {}'.format(b) if len(b) else ''
@@ -347,18 +395,6 @@ class pic:
             return '{:04x}  {:10}'.format(pc, ins.mnemonic)
 
 
-class instruction_info:
-    ''' info on an instruction '''
-
-    field_list = ['opcode', 'b', 'd', 'f', 'n', 'm', 'k']
-
-    def __init__(self, mnemonic):
-        self.mnemonic = mnemonic
-        self.fields = None
-        self.desc = None
-        self.cycles = None
-        self.flags = None
-
 def test():
     d = datamem(256)
 
@@ -374,18 +410,23 @@ def test():
     print(hex(0x204f), d.translate(0x204f), d[0x204f])
     print(hex(0x2050), d.translate(0x2050), d[0x2050])
 
-p = pic(insdata.enhmid)
+decoder = Decoder(insdata.ENHMID)
+p = Pic(decoder)
 
-print(p.decode(0b00000001100001))
-print(p.decode(0b01100110011101))
-print(p.decode(0b00100110010110))
-print(p.decode(0b11111000100101))
+print(decoder.decode(0b00000001100001))
+print(decoder.decode(0b01100110011101))
+print(decoder.decode(0b00100110010110))
+print(decoder.decode(0b11111000100101))
 
-print(p.format(1, 0b00000001100001))
-print(p.format(2, 0b01100110011101))
-print(p.format(3, 0b00100110010110))
-print(p.format(4, 0b11111000100101))
-print(p.format(5, 0b11000101011011))
+print(decoder.format(1, 0b00000001100001))
+print(decoder.format(2, 0b01100110011101))
+print(decoder.format(3, 0b00100110010110))
+print(decoder.format(4, 0b11111000100101))
+print(decoder.format(5, 0b11000101011011))
+
+x = decoder.encode('GOTO', k=0x65)
+print(decoder.format(0, x))
 
 p.clear()
+p.load(0, [ 0, 0])
 p.run()

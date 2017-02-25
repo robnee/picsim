@@ -3,7 +3,7 @@ import array
 MAXRAM = 0x1000
 MAXSTACK = 0x0010 
 
-class datamem():
+class DataMem():
     def __init__(self, maxram):
         self.maxram = maxram
         self.sfr = array.array('B')

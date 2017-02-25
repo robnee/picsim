@@ -1,12 +1,17 @@
-enhmid = [
+
+'''
+This is the instruction data grabbed from the Instruction Set Summary table
+in the Pic data sheet for an enhanced midrange (14bit) processor such as the 
+16f1826 or 12f1822.  This is used to initialize the decoder
+'''
+
+ENHMID = [
     ('NOP', '-', 'No Operation', '1', '00 0000 0000 0000', '', ''),
     ('RESET', '-', 'Software device Reset', '1', '00 0000 0000 0001', '', ''),
     ('RETURN', '-', 'Return from Subroutine', '2', '00 0000 0000 1000', '', ''),
     ('RETFIE', '-', 'Return from interrupt', '2', '00 0000 0000 1001', '', ''),
     ('CALLW', '-', 'Call Subroutine with W', '2', '00 0000 0000 1010', '', ''),
     ('BRW', '-', 'Relative Branch with W', '2', '00 0000 0000 1011', '', ''),
-    ('MOVIW', 'n mm', 'Move Indirect FSRn to Wwith pre/post inc/dec modifier, mm', '1', '00 0000 0001 0nmm', 'Z', '2,3'),
-    ('MOVWI', 'n mm', 'Move W to Indirect FSRn with pre/post inc/dec modifier, mm', '1', '00 0000 0001 1nmm', '', '2,3'),
     ('MOVLB', 'k', 'Move literal to BSR', '1', '00 0000 001k kkkk', '', ''),
     ('OPTION', '-', 'Load OPTION_REG register with W', '1', '00 0000 0110 0010', '', ''),
     ('SLEEP', '-', 'Go into Standby mode', '1', '00 0000 0110 0011', 'TO,PD', ''),
@@ -53,5 +58,5 @@ enhmid = [
     ('MOVIW', 'n mm', 'Move Indirect FSRn to W with pre/post inc/dec', '1', '00 0000 0001 0nmm', 'Z', '2,3'),
     ('MOVIW', 'k[n]', 'Move INDFn to W, Indexed Indirect', '1', '11 1111 0nkk kkkk', 'Z', '2,3'),
     ('MOVWI', 'n mm', 'Move W to Indirect FSRn with pre/post inc/dec', '1', '00 0000 0001 1nmm', '', '2'),
-    ('MOVWI', 'k[n]', 'Move W to INDFn, Indexed Indirect', '1', '11 1111 lnkk kkkk', '', '2')
+    ('MOVWI', 'k[n]', 'Move W to INDFn, Indexed Indirect', '1', '11 1111 lnkk kkkk', '', '2'),
 ]
