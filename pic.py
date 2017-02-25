@@ -4,6 +4,7 @@ import insdata
 from datamem import *
 from bitdef import *
 
+MAXROM = 0x800
 
 
 class pic:
@@ -11,6 +12,7 @@ class pic:
         ''' init class with table of instruction set data '''
         self.prog = array.array('H')
         self.data = datamem(256)
+        self.clear()
 
         # program counter high byte
         self.pch = 0
@@ -45,6 +47,10 @@ class pic:
 #            i= self.ins_ref[k]
 #            print('    def _{}(self):\n        pass\n'.format(i.mnemonic.lower()))
 
+    def clear(self):
+        # special function registers
+        self.progmem = [0 for i in range(MAXROM)]
+        
     def decode(self, word):
         ''' return a tuple of opcode, b, d, f, n, k '''
 
@@ -57,7 +63,7 @@ class pic:
             #print(mnemonic, ins.opcode_mask, ins.opcode)
             if bits.startswith(ins.opcode):
                 #print(mnemonic, ins.opcode, ins.field_spans, bits)
-                return [bits[span[0]:span[1]] for span in ins.field_spans]
+                return (mnemonic,) + tuple(bits[span[0]:span[1]] for span in ins.field_spans)
 
     def set_data(address, value):
         ''' handles writing to special locations '''
@@ -81,15 +87,21 @@ class pic:
             data[PCON] = (1 << NOT_POR) | (1 << NOT_BOR)
             data[STATUS] = (1 << NOT_PD) | (1 << NOT_TO)  
 
+    def run(self):
+        while True:
+            self.exec()
+            
     def exec(self):
         ''' exec a single instruction '''
         
         self.pc = self.get_pc()
         
-        opcode = self.prog[pc]
+        word = self.prog[pc]
         fields = self.decode(word)
         
         self.set_pc(pc + 1)
+        
+        self.dispatch(opcode, fields)
         
     def dispatch(self, opcode, fields):
         return {
@@ -146,7 +158,7 @@ class pic:
             '000110' : _xorwf,
         }[opcode](fields)
         
-    # opcode implementations         
+    # opcode implementations
     def _addfsr(self, fields):
         pass
 
@@ -300,6 +312,14 @@ class pic:
     def _xorwf(self, fields):
         pass
       
+    def format(self, pc, word):
+        fields = self.decode(word)
+        mnemonic, opcode, b, d, f, n, k = fields
+
+        ins = self.ins_ref[mnemonic]
+    
+        return('{:04x}  {:8} {}'.format(pc, ins.mnemonic, f))
+
 
 class instruction_info:
     ''' info on an instruction '''
@@ -319,6 +339,10 @@ p = pic(insdata.enhmid)
 print(p.decode(0b00000001100001))
 print(p.decode(0b01100110011101))
 print(p.decode(0b00100110010110))
+
+print(p.format(1, 0b00000001100001))
+print(p.format(2, 0b01100110011101))
+print(p.format(3, 0b00100110010110))
 
 d = datamem(256)
 
