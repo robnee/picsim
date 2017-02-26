@@ -3,6 +3,7 @@
 import re
 import array
 import insdata
+import binascii
 from datamem import *
 from bitdef import *
 
@@ -16,6 +17,9 @@ class Pic:
         self.data = DataMem(256)
         self.clear()
 
+        # cycle counter
+        self.cycles = 0
+
         # program counter high byte
         self.pch = 0
 
@@ -26,10 +30,15 @@ class Pic:
 #            print('    def _{}(self):\n        pass\n'.format(i.mnemonic.lower()))
 
     def clear(self):
+        ''' clear memory '''
         # special function registers
         self.prog = [0 for i in range(MAXROM)]
 
+        self.cycles = 0
+        self.pch = 0
+
     def load(self, address, words):
+        ''' load program memory '''
         for i, word in enumerate(words):
             self.prog[address + i] = word
 
@@ -67,6 +76,7 @@ class Pic:
         word = self.prog[self.pc]
         fields = self.decode(word)
 
+        self.cycles += 1
         self.set_pc(self.pc + 1)
         
         print(self.format(self.pc, word))
@@ -79,6 +89,7 @@ class Pic:
         return self.decoder.format(address, word)
         
     def dispatch(self, opcode, fields):
+        ''' dispatch opcode to handler '''
         return {
             '1100010': _addfsr,
             '111110': _addlw,
@@ -291,55 +302,46 @@ class Pic:
 class InstructionInfo:
     ''' info on an instruction '''
 
-    def __init__(self, mnemonic):
-        self.mnemonic = mnemonic
-        self.fields = None
-        self.desc = None
-        self.cycles = None
-        self.flags = None
+    field_list = ['opcode', 'b', 'd', 'f', 'n', 'm', 'k']
+
+    def __init__(self, rec):
+        self.mnemonic, self.arg, self.desc, self.cycles, self.opcode_mask, self.flags, self.notes = rec
+
+        # get opcode mask and remove any whitespace
+        # break opcode mask into bit spans for each field for decoding later
+        m = re.match('([01]+)x*(b*)(d*)(f*)(n*)(m*)(k*)', self.opcode_mask.replace(' ', ''))
+
+        # build a tuple of fields and their spans
+        self.opcode = m.group(1)
+        self.field_spans = tuple(m.span(i + 1) for i in range(len(self.field_list)))
 
 
 class Decoder:
     ''' Decodes and encodes instructions from/to 14 bit program words'''
-    field_list = ['opcode', 'b', 'd', 'f', 'n', 'm', 'k']
         
     def __init__(self, data):
         ''' parse instruction table and build lookup tables '''
-        self.table = {}
+        self.ins_list = []
+        self.mnemonic_dict = {}
 
         for rec in data:
-            # create an instruction info instance
-            ins = InstructionInfo(rec[0])
-            ins.arg = rec[1]
-            ins.desc = rec[2]
-            ins.cycles = rec[3]
-            ins.flags = rec[5]
-
-            # get opcode mask and remove any whitespace added for readability
-            ins.opcode_mask = rec[4].replace(' ', '')
-
-            # break opcode mask into bit spans for each field for decoding later
-            m = re.match('([01]+)x*(b*)(d*)(f*)(n*)(m*)(k*)', ins.opcode_mask)
-
-            # build a dict of fields and their spand
-            ins.opcode = m.group(1)
-            ins.field_spans = tuple(m.span(i + 1) for i in range(len(Decoder.field_list)))
-
-            self.table[ins.opcode] = ins
+            ins = InstructionInfo(rec)
+            self.ins_list.append(ins)
+            self.mnemonic_dict[ins.mnemonic] = ins
 
     def decode(self, word):
-        ''' return a tuple of opcode, b, d, f, n, m, k '''
+        ''' return a tuple of ins, opcode, b, d, f, n, m, k '''
 
         # convert program word to a bit string
         bits = '{:014b}'.format(word)
 
-        # lookup matching instruction
-        for opcode in self.table:
-            ins = self.table[opcode]
-            #print(ins.mnemonic, ins.opcode_mask, ins.opcode)
-            if bits.startswith(ins.opcode):
-                #print(mnemonic, ins.opcode, ins.field_spans, bits)
-                return (ins.mnemonic,) + tuple(bits[span[0]:span[1]] for span in ins.field_spans)
+        # the instruction word starts with the instruction opcode.  Use a generator
+        # comprehension to find match.  It returns a list so use a comma on the lhs
+        # to force an unpack.  An exception is thrown if no or multiple matches
+        ins, = [item for item in self.ins_list if bits.startswith(item.opcode)]
+
+        #print(mnemonic, ins.opcode, ins.field_spans, bits)
+        return (ins,) + tuple(bits[x:y] for x, y in ins.field_spans)
 
 #        for k in sorted(self.ins_ref):
 #            i= self.ins_ref[k]
@@ -347,38 +349,26 @@ class Decoder:
 
     def encode(self, mnemonic, **kwargs):
         # find matching mnemonic in instruction table
-        for rec in self.table:
-            ins = self.table[rec]
-            if mnemonic.upper() == ins.mnemonic:
-                bits = ins.opcode
-                
-                # build instruction from fields starting after opcode
-                for i, field_name in enumerate(Decoder.field_list):
-                    if field_name in kwargs:
-                        x, y = ins.field_spans[i]
-                        bits += '{:0{}b}'.format(kwargs[field_name], y - x)
-                print(bits, int(bits, 2))
-                # convert from string to numeric
-                return int(bits, 2)
-                
-        raise ValueError()
+        ins = self.mnemonic_dict[mnemonic.upper()]
+
+        bits = ins.opcode
+
+        # build instruction from fields starting after opcode
+        for i, field_name in enumerate(InstructionInfo.field_list):
+            if field_name in kwargs:
+                x, y = ins.field_spans[i]
+                bits += '{:0{}b}'.format(kwargs[field_name], y - x)
+
+        print(bits, int(bits, 2))
+        # convert from string to numeric
+        return int(bits, 2)
 
     def format(self, pc, word):
         fields = self.decode(word)
-        mnemonic, opcode, b, d, f, n, m, k = fields
+        ins, opcode, b, d, f, n, m, k = fields
 
-        ins = self.table[opcode]
- 
         # format the optional bit field
         sb = ', {}'.format(b) if len(b) else ''
-
-        # format the optional destination
-        if d == '0':
-            sd = ', W'
-        elif d == '1':
-            sd = ', F'
-        else:
-            sd = ''
 
         if len(f) and len(d):
             sd = 'W' if d == '0' else 'F'
@@ -394,6 +384,51 @@ class Decoder:
         else:
             return '{:04x}  {:10}'.format(pc, ins.mnemonic)
 
+
+def hex_to_sum(hex_data):
+    '''sum the hex bytes'''
+    sum = 0
+    for hex_byte in [hex_data[i: i + 2] for i in range(0, len(hex_data), 2)]:
+        sum += int(hex_byte, 16)
+
+    return sum
+
+def read_hex(filename, length):
+    fp = open(filename)
+
+    base = 0x00
+
+    # allocate a data buffer
+    prog = [0 for i in range(length)]
+
+    for line in fp:
+        m = re.search('^:(\S\S)(\S\S\S\S)(\S\S)(\S*)(\S\S)', line.strip())
+        count, address, rectype, data, checksum = m.groups()
+
+        # Convert data fields from hex
+        count = int(count, 16)
+
+        # Look for a extended address record
+        if rectype == '04':
+            base = int(data, 16) << 16
+
+        # Confirm checksum of data
+        sum = count + int(address[0:2], 16) + int(address[2:4], 16) + int(rectype, 16) + hex_to_sum(data)
+        sum = '{:02X}'.format((~sum + 1) & 0xff)
+        
+        assert sum == checksum, "Record at address ({} {}) has bad checksum ({})  I get {}".format(base, address, checksum, sum)
+
+        # Add data records to page list
+        if rectype == '00':
+            full_address = base + int(address, 16)
+            if full_address < length:
+                for i in range(count // 2):
+                    word = int(data[i * 4 + 2:i * 4 + 4] + data[i * 4:i * 4 + 2], 16)
+                    prog[full_address + i] = word
+
+                    #print('{:04x} {:02x} {:02x} {:04x}'.format(full_address, count, i, word))
+
+#		printf ("$type %2d $address(%04X %2d) $data $checksum $sum\n", $count, $page, $offset);
 
 def test():
     d = datamem(256)
@@ -413,10 +448,6 @@ def test():
 decoder = Decoder(insdata.ENHMID)
 p = Pic(decoder)
 
-print(decoder.decode(0b00000001100001))
-print(decoder.decode(0b01100110011101))
-print(decoder.decode(0b00100110010110))
-print(decoder.decode(0b11111000100101))
 
 print(decoder.format(1, 0b00000001100001))
 print(decoder.format(2, 0b01100110011101))
@@ -430,3 +461,5 @@ print(decoder.format(0, x))
 p.clear()
 p.load(0, [ 0, 0])
 p.run()
+
+read_hex('test.hex', MAXROM)
