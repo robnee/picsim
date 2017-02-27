@@ -42,6 +42,46 @@ class Pic:
         for i, word in enumerate(words):
             self.prog[address + i] = word
 
+    def load_from_file(self, filename):
+        self.clear()
+        
+        base = 0x00
+        
+        with open(filename) as fp:
+            for line in fp:
+                m = re.search('^:(\S\S)(\S\S\S\S)(\S\S)(\S*)(\S\S)', line.strip())
+                count, address, rectype, data, checksum = m.groups()
+        
+                # Convert data fields from hex
+                count = int(count, 16)
+        
+                # Look for a extended address record
+                if rectype == '04':
+                    base = int(data, 16) << 16
+        
+                # compute checksum of data
+                sum = 0
+                for hex_byte in [data[i: i + 2] for i in range(0, len(data), 2)]:
+                    sum += int(hex_byte, 16)
+                    
+                # add other fields from record
+                sum += count + int(address[0:2], 16) + int(address[2:4], 16) + int(rectype, 16)
+                
+                # convert to intel style
+                sum = '{:02X}'.format((~sum + 1) & 0xff)
+                
+                assert sum == checksum, "Record at address ({} {}) has bad checksum ({})  I get {}".format(base, address, checksum, sum)
+        
+                # load words into program mem
+                if rectype == '00':
+                    full_address = base + int(address, 16) // 2
+                    if full_address < len(self.prog):
+                        for i in range(count // 2):
+                            word = int(data[i * 4 + 2:i * 4 + 4] + data[i * 4:i * 4 + 2], 16)
+                            self.prog[full_address + i] = word
+        
+                            #print('{:04x} {:02x} {:02x} {:04x}'.format(full_address, count, i, word))
+
     def set_data(self, address, value):
         ''' handles writing to special locations '''
         if address < MAXRAM and address & 0x7F == PCL:
@@ -79,14 +119,15 @@ class Pic:
         self.cycles += 1
         self.set_pc(self.pc + 1)
         
-        print(self.format(self.pc, word))
+        print(self.decoder.format(self.pc, word))
         #self.dispatch(opcode, fields)
 
     def decode(self, word):
         return self.decoder.decode(word)
         
-    def format(self, address, word):
-        return self.decoder.format(address, word)
+    def dump(self, address_list):
+        for address in address_list:
+            print(self.decoder.format(address, self.prog[address]))
         
     def dispatch(self, opcode, fields):
         ''' dispatch opcode to handler '''
@@ -385,50 +426,7 @@ class Decoder:
             return '{:04x}  {:10}'.format(pc, ins.mnemonic)
 
 
-def hex_to_sum(hex_data):
-    '''sum the hex bytes'''
-    sum = 0
-    for hex_byte in [hex_data[i: i + 2] for i in range(0, len(hex_data), 2)]:
-        sum += int(hex_byte, 16)
 
-    return sum
-
-def read_hex(filename, length):
-    fp = open(filename)
-
-    base = 0x00
-
-    # allocate a data buffer
-    prog = [0 for i in range(length)]
-
-    for line in fp:
-        m = re.search('^:(\S\S)(\S\S\S\S)(\S\S)(\S*)(\S\S)', line.strip())
-        count, address, rectype, data, checksum = m.groups()
-
-        # Convert data fields from hex
-        count = int(count, 16)
-
-        # Look for a extended address record
-        if rectype == '04':
-            base = int(data, 16) << 16
-
-        # Confirm checksum of data
-        sum = count + int(address[0:2], 16) + int(address[2:4], 16) + int(rectype, 16) + hex_to_sum(data)
-        sum = '{:02X}'.format((~sum + 1) & 0xff)
-        
-        assert sum == checksum, "Record at address ({} {}) has bad checksum ({})  I get {}".format(base, address, checksum, sum)
-
-        # Add data records to page list
-        if rectype == '00':
-            full_address = base + int(address, 16)
-            if full_address < length:
-                for i in range(count // 2):
-                    word = int(data[i * 4 + 2:i * 4 + 4] + data[i * 4:i * 4 + 2], 16)
-                    prog[full_address + i] = word
-
-                    #print('{:04x} {:02x} {:02x} {:04x}'.format(full_address, count, i, word))
-
-#		printf ("$type %2d $address(%04X %2d) $data $checksum $sum\n", $count, $page, $offset);
 
 def test():
     d = datamem(256)
@@ -444,22 +442,22 @@ def test():
     print(hex(0x2055), d.translate(0x2055), d[0x2055])
     print(hex(0x204f), d.translate(0x204f), d[0x204f])
     print(hex(0x2050), d.translate(0x2050), d[0x2050])
+    
+    print(decoder.format(1, 0b00000001100001))
+    print(decoder.format(2, 0b01100110011101))
+    print(decoder.format(3, 0b00100110010110))
+    print(decoder.format(4, 0b11111000100101))
+    print(decoder.format(5, 0b11000101011011))
 
 decoder = Decoder(insdata.ENHMID)
 p = Pic(decoder)
-
-
-print(decoder.format(1, 0b00000001100001))
-print(decoder.format(2, 0b01100110011101))
-print(decoder.format(3, 0b00100110010110))
-print(decoder.format(4, 0b11111000100101))
-print(decoder.format(5, 0b11000101011011))
 
 x = decoder.encode('GOTO', k=0x65)
 print(decoder.format(0, x))
 
 p.clear()
-p.load(0, [ 0, 0])
-p.run()
+p.load(0, [0b01100110011101, 0b00100110010110])
+#p.run()
 
-read_hex('test.hex', MAXROM)
+p.load_from_file('test.hex')
+p.dump(range(20))
