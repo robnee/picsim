@@ -1,14 +1,40 @@
+'''
+implement a Pic's data memory. this includes the quirks of the non-linear address space and 
+common ram regions as well as the special function registers that map to multiple locations.
+Also implements the stack region.
+
+there are 32 banks of 128 bytes in the traditional addressing scheme. the lower 32 bytes of
+each bank is dedicated to special function registers. the first 12 SFR locations in every
+bank all map back to the first 12 bytes of bank zero.  locations in each bank above the SFR
+region is mapped to general purpose registers (RAM). this is implemented as a contiguous
+vector.  these gpr locations are spread over the first n banks. typically the first 3 or 4.
+the top 16 locations of gpr in all banks map to bank zero called common ram. 
+
+the gpr memory may be accessed as a continuous vector (excluding common ram) using addresses
+starting at 0x2000
+
+translate function resolves addresses into a bank, location and linear gpr address.  it also
+accepts addresses as register names which it looks up in a dictionary. 
+
+__setitem__ and __getitem__ use the translation function to resolve addresses and then set
+or get a value from the correct region (sfr, gpr)
+'''
+
 import array
 
 MAXRAM = 0x1000
 MAXSTACK = 0x0010 
 
 class DataMem():
-    def __init__(self, maxram):
+    def __init__(self, maxram, reg):
         self.maxram = maxram
         self.sfr = array.array('B')
         self.gpr = array.array('B')
         self.stack = array.array('H')
+        
+        # register names
+        self.reg = reg
+        
         self.clear()
 
     def clear(self):
@@ -21,6 +47,11 @@ class DataMem():
 
     def translate(self, address):
         ''' translate into bank, location, linear using traditional or linear data addressing '''
+        
+        # allow location to be a register name or int address 
+        address = self.reg[address] if isinstance(address, str) else address
+        
+        # determine if this is a traditional (0x1000) or linear (0x2000) address
         if 0 <= address <= 0xFFF:
             bank, location = divmod(address, 0x80)
             if location <= 0x0B:

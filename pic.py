@@ -1,20 +1,27 @@
 #! /usr/bin/python3
+'''
+minimal Microchip Pic Enhanced (16f1826) midrange (14bit) core simulator
+'''
 
 import re
 import array
 import insdata
 import binascii
 from datamem import *
-from bitdef import *
+#from bitdef import *
 
 MAXROM = 0x800
 
 
 class Pic:
-    def __init__(self, decoder):
+    def __init__(self, decoder, incfile):
         ''' init class with table of instruction set data '''
+        
+        # load include file with reg definitions
+        self.load_inc_file(incfile)
+        
         self.prog = array.array('H')
-        self.data = DataMem(256)
+        self.data = DataMem(256, self.reg)
         self.clear()
 
         # cycle counter
@@ -25,9 +32,17 @@ class Pic:
 
         self.decoder = decoder
 
-#        for k in sorted(self.ins_ref):
-#            i= self.ins_ref[k]
-#            print('    def _{}(self):\n        pass\n'.format(i.mnemonic.lower()))
+    def load_inc_file(self, filename):
+        ''' load the register and config word definitions from .inc file and build a dict'''
+        
+        with open(filename) as fp:
+            self.reg = {}
+            for line in fp:
+                # STATUS EQU  H'0003'
+                m = re.search("(?i)^(\S+)\s+EQU\s+H'(\S+)'", line.strip())
+                if m:
+                    name, value = m.groups()
+                    self.reg[name] = int(value, 16)
 
     def clear(self):
         ''' clear memory '''
@@ -90,22 +105,23 @@ class Pic:
             self.data[address] = value
             
     def get_pc(self):
-        return (self.pch << 8) | self.data[PCL]
+        return (self.pch << 8) | self.data['PCL']
         
     def set_pc(self, address):
-        self.pch, self.data[PCL] = divmod(address, 0X100)
+        self.pch, self.data['PCL'] = divmod(address, 0X100)
 
-    def reset(self, cond=NOT_POR):
+    def reset(self, cond=None):
         self.data.clear()
-        if cond == NOT_POR:
-            data[PCON] = (1 << NOT_POR) | (1 << NOT_BOR)
-            data[STATUS] = (1 << NOT_PD) | (1 << NOT_TO)
+        if cond is None or cond == self.reg['NOT_POR']:
+            self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
+            self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
         elif cond == NOT_RI:
-            data[PCON] = (1 << NOT_POR) | (1 << NOT_BOR)
-            data[STATUS] = (1 << NOT_PD) | (1 << NOT_TO)  
+            self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
+            self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
 
     def run(self):
         for _ in range(10):
+            self.status()
             self.exec()
 
     def exec(self):
@@ -120,7 +136,7 @@ class Pic:
         self.set_pc(self.pc + 1)
         
         print(self.decoder.format(self.pc, word))
-        #self.dispatch(opcode, fields)
+        self.dispatch(fields)
 
     def decode(self, word):
         return self.decoder.decode(word)
@@ -128,61 +144,66 @@ class Pic:
     def dump(self, address_list):
         for address in address_list:
             print(self.decoder.format(address, self.prog[address]))
+
+    def status(self):
+        print('PC:{:02X}{:02X} ST:{:05b} W:{:02X}'.format(self.pch, self.data['PCL'], self.data['STATUS'], self.data['WREG']))
         
-    def dispatch(self, opcode, fields):
+    def dispatch(self, fields):
         ''' dispatch opcode to handler '''
+        print(fields)
+        opcode = fields[1]
         return {
-            '1100010': _addfsr,
-            '111110': _addlw,
-            '000111': _addwf,
-            '111101': _addwfc,
-            '111001': _andlw,
-            '000101': _andwf,
-            '110111': _asrf,
-            '0100': _bcf,
-            '11001': _bra,
-            '00000000001011': _brw,
-            '0101': _bsf,
-            '0110': _btfsc,
-            '0111': _btfss,
-            '100': _call,
-            '00000000001010': _callw,
-            '0000011': _clrf,
-            '000001000000': _clrw,
-            '00000001100100': _clrwdt,
-            '001001': _comf,
-            '000011': _decf,
-            '001011': _decfsz,
-            '101': _goto,
-            '001010': _incf,
-            '001111': _incfsz,
-            '111000': _iorlw,
-            '000100': _iorwf,
-            '110101': _lslf,
-            '110110': _lsrf,
-            '001000': _movf,
-            '1111110': _moviw,
-            '000000001': _movlb,
-            '1100011': _movlp,
-            '110000': _movlw,
-            '0000001': _movwf,
-            '111111': _movwi,
-            '00000000000000': _nop,
-            '00000001100010': _option,
-            '00000000000001': _reset,
-            '00000000001001': _retfie,
-            '110100': _retlw,
-            '00000000001000': _return,
-            '001101': _rle,
-            '001100': _rrf,
-            '00000001100011': _sleep,
-            '111100': _sublw,
-            '000010': _subwf,
-            '111011': _subwfb,
-            '001110': _swapf,
-            '00000001100': _tris,
-            '111010': _xorlw,
-            '000110': _xorwf,
+            '1100010': self._addfsr,
+            '111110': self._addlw,
+            '000111': self._addwf,
+            '111101': self._addwfc,
+            '111001': self._andlw,
+            '000101': self._andwf,
+            '110111': self._asrf,
+            '0100': self._bcf,
+            '11001': self._bra,
+            '00000000001011': self._brw,
+            '0101': self._bsf,
+            '0110': self._btfsc,
+            '0111': self._btfss,
+            '100': self._call,
+            '00000000001010': self._callw,
+            '0000011': self._clrf,
+            '000001000000': self._clrw,
+            '00000001100100': self._clrwdt,
+            '001001': self._comf,
+            '000011': self._decf,
+            '001011': self._decfsz,
+            '101': self._goto,
+            '001010': self._incf,
+            '001111': self._incfsz,
+            '111000': self._iorlw,
+            '000100': self._iorwf,
+            '110101': self._lslf,
+            '110110': self._lsrf,
+            '001000': self._movf,
+            '1111110': self._moviw,
+            '000000001': self._movlb,
+            '1100011': self._movlp,
+            '110000': self._movlw,
+            '0000001': self._movwf,
+            '111111': self._movwi,
+            '00000000000000': self._nop,
+            '00000001100010': self._option,
+            '00000000000001': self._reset,
+            '00000000001001': self._retfie,
+            '110100': self._retlw,
+            '00000000001000': self._return,
+            '001101': self._rle,
+            '001100': self._rrf,
+            '00000001100011': self._sleep,
+            '111100': self._sublw,
+            '000010': self._subwf,
+            '111011': self._subwfb,
+            '001110': self._swapf,
+            '00000001100': self._tris,
+            '111010': self._xorlw,
+            '000110': self._xorwf,
         }[opcode](fields)
         
     # opcode implementations
@@ -250,7 +271,8 @@ class Pic:
         pass
 
     def _goto(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.set_pc((self.data['PCLATH'] & 0b1111000 << 3) | self.data['PCL'])
 
     def _incf(self, fields):
         pass
@@ -420,12 +442,12 @@ class Decoder:
             return '{:04x}  {:10} 0x{:02x}'.format(pc, ins.mnemonic, int(f, 2))
         elif len(n) and len(k):
             return '{:04x}  {:10} FSR{}, 0x{:02x}'.format(pc, ins.mnemonic, n, int(k, 2))
+        elif len(k) > 8:
+            return '{:04x}  {:10} 0x{:03x}'.format(pc, ins.mnemonic, int(k, 2))
         elif len(k):
             return '{:04x}  {:10} 0x{:02x}'.format(pc, ins.mnemonic, int(k, 2))
         else:
             return '{:04x}  {:10}'.format(pc, ins.mnemonic)
-
-
 
 
 def test():
@@ -450,14 +472,12 @@ def test():
     print(decoder.format(5, 0b11000101011011))
 
 decoder = Decoder(insdata.ENHMID)
-p = Pic(decoder)
+p = Pic(decoder, 'p16f1826.inc')
 
 x = decoder.encode('GOTO', k=0x65)
 print(decoder.format(0, x))
 
-p.clear()
-p.load(0, [0b01100110011101, 0b00100110010110])
-#p.run()
-
 p.load_from_file('test.hex')
 p.dump(range(20))
+
+p.run()
