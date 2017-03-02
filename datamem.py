@@ -82,6 +82,6 @@ class DataMem():
         bank, location, linear = self.translate(address)
         #print(hex(bank), hex(location), hex(linear))
         if location < 0x20:
-            self.sfr[bank * 0x20 + location] = value
+            self.sfr[bank * 0x20 + location] = value & 0xFF
         else:
-            self.gpr[linear] = value
+            self.gpr[linear] = value & 0xFF

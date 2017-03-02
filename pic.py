@@ -103,13 +103,58 @@ class Pic:
             self.set_pc((self.data[PCLATH] << 8) | value)
         else:
             self.data[address] = value
-            
-    def get_pc(self):
-        return (self.pch << 8) | self.data['PCL']
+
+    def push(self):
+        pass
         
-    def set_pc(self, address):
+    def pop(self):
+        pass
+
+    @property        
+    def pc(self):
+        ''' get the value of the program counter '''
+        return (self.pch << 8) | self.data['PCL']
+    
+    @pc.setter
+    def pc(self, address):
         self.pch, self.data['PCL'] = divmod(address, 0X100)
 
+    @property
+    def z(self):
+        ''' get STATUS register Z bit as 0 or 1 '''
+        return 1 if self.data['STATUS'] & (1 << self.reg['Z']) else 0
+    
+    @z.setter
+    def z(self, value):
+        if value:
+            self.data['STATUS'] &= ~(1 << self.reg['Z'])
+        else:
+            self.data['STATUS'] |= (1 << self.reg['Z'])
+
+    @property
+    def c(self):
+        ''' get STATUS register Z bit as 0 or 1 '''
+        return 1 if self.data['STATUS'] & (1 << self.reg['Z']) else 0
+    
+    @z.setter
+    def c(self, value):
+        if value:
+            self.data['STATUS'] &= ~(1 << self.reg['C'])
+        else:
+            self.data['STATUS'] |= (1 << self.reg['C'])
+
+    @property
+    def dc(self):
+        ''' get STATUS register Z bit as 0 or 1 '''
+        return 1 if self.data['STATUS'] & (1 << self.reg['DC']) else 0
+    
+    @z.setter
+    def dc(self, value):
+        if value:
+            self.data['STATUS'] &= ~(1 << self.reg['DC'])
+        else:
+            self.data['STATUS'] |= (1 << self.reg['DC'])
+            
     def reset(self, cond=None):
         self.data.clear()
         if cond is None or cond == self.reg['NOT_POR']:
@@ -120,23 +165,22 @@ class Pic:
             self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
 
     def run(self):
-        for _ in range(10):
+        for _ in range(30):
             self.status()
             self.exec()
 
     def exec(self):
         ''' exec a single instruction '''
-        
-        self.pc = self.get_pc()
  
         word = self.prog[self.pc]
         fields = self.decode(word)
 
         self.cycles += 1
-        self.set_pc(self.pc + 1)
+        self.pc += 1
         
         print(self.decoder.format(self.pc, word))
-        self.dispatch(fields)
+        print(fields[1:])
+        self.dispatch(fields) 
 
     def decode(self, word):
         return self.decoder.decode(word)
@@ -146,11 +190,11 @@ class Pic:
             print(self.decoder.format(address, self.prog[address]))
 
     def status(self):
-        print('PC:{:02X}{:02X} ST:{:05b} W:{:02X}'.format(self.pch, self.data['PCL'], self.data['STATUS'], self.data['WREG']))
+        print('PC:{:02X}{:02X} BS:{:02X} ST:{:05b} W:{:02X} CC:{:d}'.format(self.pch, self.data['PCL'], self.data['BSR'], self.data['STATUS'], self.data['WREG'],
+        self.cycles))
         
     def dispatch(self, fields):
         ''' dispatch opcode to handler '''
-        print(fields)
         opcode = fields[1]
         return {
             '1100010': self._addfsr,
@@ -194,7 +238,7 @@ class Pic:
             '00000000001001': self._retfie,
             '110100': self._retlw,
             '00000000001000': self._return,
-            '001101': self._rle,
+            '001101': self._rlf,
             '001100': self._rrf,
             '00000001100011': self._sleep,
             '111100': self._sublw,
@@ -211,7 +255,13 @@ class Pic:
         pass
 
     def _addlw(self, fields):
-        pass
+        k = int(fields[7], 2)
+        v = self.data['WREG'] + k
+        r = (self.data['WREG'] & 0x0f) + (k & 0xf)
+        self.data['WREG'] = v
+        self.c = v & 0x100
+        self.dc = r & 0x10
+        self.z = not (v & 0xff)
 
     def _addwf(self, fields):
         pass
@@ -220,71 +270,133 @@ class Pic:
         pass
 
     def _andlw(self, fields):
-        pass
+        k = int(fields[7], 2)
+        v = self.data['WREG'] & k
+        self.data['WREG'] = v
+        self.z = v == 0
 
     def _andwf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.data[f] & self.data['WREG']
+        self.data['WREG' if d == '0' else f] = v
+        self.z = v == 0
 
     def _asrf(self, fields):
         pass
 
     def _bcf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        b = int(fields[2], 2)
+        self.data[f] &= ~(1 << b)
 
     def _bra(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.pc += twos_complement(k, len(k))
+        self.cycles += 1
 
     def _brw(self, fields):
-        pass
+        self.pc += self.data['WREG']
+        self.cycles += 1
 
     def _bsf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        b = int(fields[2], 2)
+        self.data[f] |= (1 << b)
 
     def _btfsc(self, fields):
-        pass
+        f = int(fields[4], 2)
+        b = int(fields[2], 2)
+        if not self.data[f] & (1 << b):
+            self.pc += 1
+            self.cycles += 1
 
     def _btfss(self, fields):
-        pass
+        f = int(fields[4], 2)
+        b = int(fields[2], 2)
+        if self.data[f] & (1 << b):
+            self.pc += 1
+            self.cycles += 1
 
     def _call(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.push()
+        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | k
+        self.cycles += 1
 
     def _callw(self, fields):
-        pass
+        self.push()
+        self.pc = (self.data['PCLATH'] & 0b01111111 << 8) | self.data['WREG']
+        self.cycles += 1
 
     def _clrf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        self.data[f] = 0
+        self.z = 0
 
     def _clrw(self, fields):
-        pass
+        self.data['WREG'] = 0
+        self.z = 0
 
     def _clrwdt(self, fields):
         pass
 
     def _comf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = (self.data[f] - 1) & 0xFF
+        self.data['WREG' if d == '0' else f] = v
+        self.z = v == 0
 
     def _decf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = (~self.data[f]) & 0xFF
+        self.data['WREG' if d == '0' else f] = v
+        self.z = v == 0
 
     def _decfsz(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = (self.data[f] - 1) & 0xFF
+        self.data['WREG' if d == '0' else f] = v
+        if not v:
+            self.pc += 1
+            self.cycles += 1
 
     def _goto(self, fields):
         k = int(fields[7], 2)
-        self.set_pc((self.data['PCLATH'] & 0b1111000 << 3) | self.data['PCL'])
+        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | k
+        self.cycles += 1
 
     def _incf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = (self.data[f] + 1) & 0xFF
+        self.data['WREG' if d == '0' else f] = v
+        self.z = v == 0
 
     def _incfsz(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = (self.data[f] + 1) & 0xFF
+        self.data['WREG' if d == '0' else f] = v
+        if not v:
+            self.pc += 1
+            self.cycles += 1
 
     def _iorlw(self, fields):
-        pass
+        k = int(fields[7], 2)
+        v = self.data['WREG'] | k
+        self.data['WREG'] = v
+        self.z = v == 0
 
     def _iorwf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.data[f] | self.data['WREG']
+        self.data['WREG' if d == '0' else f] = v
+        self.z = v == 0
 
     def _lslf(self, fields):
         pass
@@ -293,22 +405,29 @@ class Pic:
         pass
 
     def _movf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        self.data['WREG' if d == '0' else f] = self.data[f]
+        self.z = v
 
     def _moviw(self, fields):
         pass
 
     def _movlb(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.data['BSR'] = k
 
     def _movlp(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.data['PCLATH'] = k
 
     def _movlw(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.data['WREG'] = k
 
     def _movwf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        self.data[f] = self.data['WREG']
 
     def _movwi(self, fields):
         pass
@@ -317,7 +436,7 @@ class Pic:
         pass
 
     def _option(self, fields):
-        pass
+        self.data['OPTION' ] = self.data['WREG']
 
     def _reset(self, fields):
         self.reset(NOT_RI)
@@ -326,12 +445,16 @@ class Pic:
         pass
 
     def _retlw(self, fields):
-        pass
+        k = int(fields[7], 2)
+        self.data['WREG'] = k
+        self.pop()
+        self.cycles += 1
 
     def _return(self, fields):
-        pass
+        self.pop()
+        self.cycles += 1
 
-    def _rle(self, fields):
+    def _rlf(self, fields):
         pass
 
     def _rrf(self, fields):
@@ -353,13 +476,24 @@ class Pic:
         pass
 
     def _tris(self, fields):
-        pass
+        f = int(fields[4], 2)
+        if f == '101':
+            self.data['TRISA'] = self.data['WREG']
+        elif F == '110':
+            self.data['TRIS'] = self.data['WREG']
 
     def _xorlw(self, fields):
-        pass
+        k = int(fields[7], 2)
+        v = self.data['WREG'] ^ k
+        self.data['WREG'] = v
+        self.z = v == 0
 
     def _xorwf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.data[f] ^ self.data['WREG']
+        self.data['WREG' if d == '0' else f] = v
+        self.z = v == 0
   
 
 class InstructionInfo:
@@ -449,6 +583,10 @@ class Decoder:
         else:
             return '{:04x}  {:10}'.format(pc, ins.mnemonic)
 
+def twos_complement(input_value, num_bits):
+    '''Calculates a two's complement integer from the given input and num bits'''
+    mask = 2**(num_bits - 1)
+    return -(input_value & mask) + (input_value & ~mask)
 
 def test():
     d = datamem(256)
@@ -478,6 +616,6 @@ x = decoder.encode('GOTO', k=0x65)
 print(decoder.format(0, x))
 
 p.load_from_file('test.hex')
-p.dump(range(20))
+p.dump(range(30))
 
 p.run()

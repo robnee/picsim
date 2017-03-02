@@ -31,7 +31,7 @@ ENHMID = [
     ('INCF', 'f,d', 'Increment f', '1', '00 1010 dfff ffff', 'Z', '2'),
     ('DECFSZ', 'f,d', 'Decrementf,Skip if 0', '1,2', '00 1011 dfff ffff', '', '1,2'),
     ('RRF', 'f,d', 'Rotate Right f through Carry', '1', '00 1100 dfff ffff', 'C', '2'),
-    ('RLE', 'f,d', 'Rotate Left f through Carry', '1', '00 1101 dfff ffff', 'C', '2'),
+    ('RLF', 'f,d', 'Rotate Left f through Carry', '1', '00 1101 dfff ffff', 'C', '2'),
     ('SWAPF', 'f,d', 'Swap nibbles in f', '1', '00 1110 dfff ffff', '', '2'),
     ('INCFSZ', 'f,d', 'Incrementf, Skip if 0', '1,2', '00 1111 dfff ffff', '', '1,2'),
     ('BCF', 'f,b', 'Bit Clear f', '1', '01 00bb bfff ffff', '', '2'),
