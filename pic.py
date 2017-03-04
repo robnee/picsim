@@ -1,6 +1,12 @@
 #! /usr/bin/python3
 '''
 minimal Microchip Pic Enhanced (16f1826) midrange (14bit) core simulator
+
+todo:
+- add some same programs using the build in assembler to flesh it out
+- finish coding instructions
+- add push and pop
+
 '''
 
 import re
@@ -52,7 +58,7 @@ class Pic:
         self.cycles = 0
         self.pch = 0
 
-    def load(self, address, words):
+    def load_program(self, address, words):
         ''' load program memory '''
         for i, word in enumerate(words):
             self.prog[address + i] = word
@@ -96,6 +102,15 @@ class Pic:
                             self.prog[full_address + i] = word
         
                             #print('{:04x} {:02x} {:02x} {:04x}'.format(full_address, count, i, word))
+
+    def load(self, f):
+        ''' load data from banked memory '''
+        address = self.data['BSR'] + f
+        return self.data[address]
+
+    def store(self, f, value):
+        address = self.data['BSR'] + f
+        self.data[address] = value
 
     def set_data(self, address, value):
         ''' handles writing to special locations '''
@@ -175,11 +190,13 @@ class Pic:
         word = self.prog[self.pc]
         fields = self.decode(word)
 
+        # display instruction
+        print(self.decoder.format(self.pc, word))
+        print(fields[1:])
+
         self.cycles += 1
         self.pc += 1
         
-        print(self.decoder.format(self.pc, word))
-        print(fields[1:])
         self.dispatch(fields) 
 
     def decode(self, word):
@@ -278,8 +295,11 @@ class Pic:
     def _andwf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = self.data[f] & self.data['WREG']
-        self.data['WREG' if d == '0' else f] = v
+        v = self.load(f) & self.data['WREG']
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v == 0
 
     def _asrf(self, fields):
@@ -288,11 +308,12 @@ class Pic:
     def _bcf(self, fields):
         f = int(fields[4], 2)
         b = int(fields[2], 2)
-        self.data[f] &= ~(1 << b)
+        v = self.load(f) & ~(1 << b)
+        self.store(f, v)
 
     def _bra(self, fields):
         k = int(fields[7], 2)
-        self.pc += twos_complement(k, len(k))
+        self.pc += twos_complement(k, len(fields[7]))
         self.cycles += 1
 
     def _brw(self, fields):
@@ -302,19 +323,20 @@ class Pic:
     def _bsf(self, fields):
         f = int(fields[4], 2)
         b = int(fields[2], 2)
-        self.data[f] |= (1 << b)
+        v = self.load(f) | (1 << b)
+        self.store(f, v)
 
     def _btfsc(self, fields):
         f = int(fields[4], 2)
         b = int(fields[2], 2)
-        if not self.data[f] & (1 << b):
+        if not self.load(f) & (1 << b):
             self.pc += 1
             self.cycles += 1
 
     def _btfss(self, fields):
         f = int(fields[4], 2)
         b = int(fields[2], 2)
-        if self.data[f] & (1 << b):
+        if self.load(f) & (1 << b):
             self.pc += 1
             self.cycles += 1
 
@@ -331,7 +353,7 @@ class Pic:
 
     def _clrf(self, fields):
         f = int(fields[4], 2)
-        self.data[f] = 0
+        self.store(f, 0)
         self.z = 0
 
     def _clrw(self, fields):
@@ -344,22 +366,31 @@ class Pic:
     def _comf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = (self.data[f] - 1) & 0xFF
-        self.data['WREG' if d == '0' else f] = v
+        v = (self.load(f) - 1) & 0xFF
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v == 0
 
     def _decf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = (~self.data[f]) & 0xFF
-        self.data['WREG' if d == '0' else f] = v
+        v = (~self.load(f)) & 0xFF
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v == 0
 
     def _decfsz(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = (self.data[f] - 1) & 0xFF
-        self.data['WREG' if d == '0' else f] = v
+        v = (self.load(f) - 1) & 0xFF
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         if not v:
             self.pc += 1
             self.cycles += 1
@@ -372,15 +403,21 @@ class Pic:
     def _incf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = (self.data[f] + 1) & 0xFF
-        self.data['WREG' if d == '0' else f] = v
+        v = (self.load(f) + 1) & 0xFF
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v == 0
 
     def _incfsz(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = (self.data[f] + 1) & 0xFF
-        self.data['WREG' if d == '0' else f] = v
+        v = (self.load(f) + 1) & 0xFF
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         if not v:
             self.pc += 1
             self.cycles += 1
@@ -394,8 +431,11 @@ class Pic:
     def _iorwf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = self.data[f] | self.data['WREG']
-        self.data['WREG' if d == '0' else f] = v
+        v = self.load(f) | self.data['WREG']
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v == 0
 
     def _lslf(self, fields):
@@ -407,7 +447,11 @@ class Pic:
     def _movf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        self.data['WREG' if d == '0' else f] = self.data[f]
+        v = self.load(f)
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v
 
     def _moviw(self, fields):
@@ -427,7 +471,8 @@ class Pic:
 
     def _movwf(self, fields):
         f = int(fields[4], 2)
-        self.data[f] = self.data['WREG']
+        v = self.data['WREG']
+        self.store(f, v)
 
     def _movwi(self, fields):
         pass
@@ -491,8 +536,11 @@ class Pic:
     def _xorwf(self, fields):
         f = int(fields[4], 2)
         d = fields[3]
-        v = self.data[f] ^ self.data['WREG']
-        self.data['WREG' if d == '0' else f] = v
+        v = self.load(f) ^ self.data['WREG']
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
         self.z = v == 0
   
 
@@ -586,6 +634,7 @@ class Decoder:
 def twos_complement(input_value, num_bits):
     '''Calculates a two's complement integer from the given input and num bits'''
     mask = 2**(num_bits - 1)
+    print (mask, input_value & mask, ~mask, input_value & ~mask)
     return -(input_value & mask) + (input_value & ~mask)
 
 def test():
@@ -609,13 +658,33 @@ def test():
     print(decoder.format(4, 0b11111000100101))
     print(decoder.format(5, 0b11000101011011))
 
+def code1(p, d):
+    ''' Simple countdown loop'''
+    code = [
+        d.encode('GOTO', k=0x004),
+        d.encode('NOP'),
+        d.encode('NOP'),
+        d.encode('NOP'),
+        d.encode('MOVLW', k=0x05),
+        d.encode('MOVWF', f=0x30),
+        d.encode('DECFSZ', f=0x30),
+        d.encode('BRA', k=-2 & 0x1ff),
+        d.encode('RESET')
+    ]
+
+    p.load_program(0, code)
+ 
+def code2(p, d):
+    p.load_from_file('test.hex')
+
 decoder = Decoder(insdata.ENHMID)
 p = Pic(decoder, 'p16f1826.inc')
 
 x = decoder.encode('GOTO', k=0x65)
 print(decoder.format(0, x))
 
-p.load_from_file('test.hex')
-p.dump(range(30))
+print(hex(twos_complement(-2, 9)))
 
+code1(p, decoder)
+p.dump(range(30))
 p.run()
