@@ -175,7 +175,7 @@ class Pic:
         if cond is None or cond == self.reg['NOT_POR']:
             self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
             self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
-        elif cond == NOT_RI:
+        elif cond == self.reg['NOT_RI']:
             self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
             self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
 
@@ -192,7 +192,6 @@ class Pic:
 
         # display instruction
         print(self.decoder.format(self.pc, word))
-        print(fields[1:])
 
         self.cycles += 1
         self.pc += 1
@@ -484,7 +483,7 @@ class Pic:
         self.data['OPTION' ] = self.data['WREG']
 
     def _reset(self, fields):
-        self.reset(NOT_RI)
+        self.reset(self.reg['NOT_RI'])
         
     def _retfie(self, fields):
         pass
@@ -559,6 +558,14 @@ class InstructionInfo:
         # build a tuple of fields and their spans
         self.opcode = m.group(1)
         self.field_spans = tuple(m.span(i + 1) for i in range(len(self.field_list)))
+    
+    def __str__(self):
+        s = self.opcode
+        for field, span in zip(self.field_list, self.field_spans):
+            if span[0] != span[1]:
+                s += ', {}={}'.format(field, span)
+            
+        return s
 
 
 class Decoder:
@@ -600,20 +607,18 @@ class Decoder:
 
         # build instruction from fields starting after opcode
         for i, field_name in enumerate(InstructionInfo.field_list):
+            x, y = ins.field_spans[i]
             if field_name in kwargs:
-                x, y = ins.field_spans[i]
                 bits += '{:0{}b}'.format(kwargs[field_name], y - x)
-
-        print(bits, int(bits, 2))
+            elif field_name != 'opcode' and x != y:
+                raise IndexError('{} {}:{} missing'.format(field_name, x, y))
+        
         # convert from string to numeric
         return int(bits, 2)
 
     def format(self, pc, word):
         fields = self.decode(word)
         ins, opcode, b, d, f, n, m, k = fields
-
-        # format the optional bit field
-        sb = ', {}'.format(b) if len(b) else ''
 
         if len(f) and len(d):
             sd = 'W' if d == '0' else 'F'
@@ -634,7 +639,6 @@ class Decoder:
 def twos_complement(input_value, num_bits):
     '''Calculates a two's complement integer from the given input and num bits'''
     mask = 2**(num_bits - 1)
-    print (mask, input_value & mask, ~mask, input_value & ~mask)
     return -(input_value & mask) + (input_value & ~mask)
 
 def test():
@@ -657,6 +661,10 @@ def test():
     print(decoder.format(3, 0b00100110010110))
     print(decoder.format(4, 0b11111000100101))
     print(decoder.format(5, 0b11000101011011))
+    
+    x = decoder.encode('GOTO', k=0x65)
+    print(decoder.format(0, x))
+
 
 def code1(p, d):
     ''' Simple countdown loop'''
@@ -667,7 +675,7 @@ def code1(p, d):
         d.encode('NOP'),
         d.encode('MOVLW', k=0x05),
         d.encode('MOVWF', f=0x30),
-        d.encode('DECFSZ', f=0x30),
+        d.encode('DECFSZ', d=1, f=0x30),
         d.encode('BRA', k=-2 & 0x1ff),
         d.encode('RESET')
     ]
@@ -679,11 +687,6 @@ def code2(p, d):
 
 decoder = Decoder(insdata.ENHMID)
 p = Pic(decoder, 'p16f1826.inc')
-
-x = decoder.encode('GOTO', k=0x65)
-print(decoder.format(0, x))
-
-print(hex(twos_complement(-2, 9)))
 
 code1(p, decoder)
 p.dump(range(30))
