@@ -10,13 +10,15 @@ todo:
 '''
 
 import re
+import time
 import array
+
 import insdata
 import binascii
-from datamem import *
-#from bitdef import *
+import datamem
 
 MAXROM = 0x800
+MAXSTACK = 0x0010 
 
 
 class Pic:
@@ -27,7 +29,8 @@ class Pic:
         self.load_inc_file(incfile)
         
         self.prog = array.array('H')
-        self.data = DataMem(256, self.reg)
+        self.stack = array.array('H')
+        self.data = datamem.DataMem(256, self.reg)
         self.clear()
 
         # cycle counter
@@ -54,6 +57,8 @@ class Pic:
         ''' clear memory '''
         # special function registers
         self.prog = [0 for i in range(MAXROM)]
+        # stack
+        self.stack = [0 for i in range(MAXSTACK)]
 
         self.cycles = 0
         self.pch = 0
@@ -119,12 +124,6 @@ class Pic:
         else:
             self.data[address] = value
 
-    def push(self):
-        pass
-        
-    def pop(self):
-        pass
-
     @property        
     def pc(self):
         ''' get the value of the program counter '''
@@ -166,10 +165,46 @@ class Pic:
     @z.setter
     def dc(self, value):
         if value:
-            self.data['STATUS'] &= ~(1 << self.reg['DC'])
+            self.set_bit('STATUS', self.reg['DC'])
         else:
-            self.data['STATUS'] |= (1 << self.reg['DC'])
+            self.clear_bit('STATUS', self.reg['DC'])
             
+    def set_bit(self, register, bit_number):
+        self.data[register] |= (1 << bit_number)
+
+    def clear_bit(self, register, bit_number):
+        self.data[register] &= ~(1 << bit_number)
+
+    def push(self):
+        # get sp
+        sp = self.data['STKPTR']
+
+        # Set overflow bit
+        if sp == 0x0F:
+            self.set_bit('PCON', self.reg['STKOVR'])
+
+        # STVREN is not implemented so stack wraps and no reset occurs
+        sp = (sp + 1) & 0x0F
+
+        # save return address and update STKPTR
+        self.stack[sp] = self.pc
+        self.data['STKPTR'] = sp
+
+        
+    def pop(self):
+        # get sp
+        sp = self.data['STKPTR']
+
+        # set underflow bit
+        if sp == 0:
+            self.set_bit('PCON', self.reg['STKUNF'])
+
+        # restore return address and update STKPTR
+        self.pc = self.stack[sp]
+
+        # STVREN is not implemented so stack wraps and no reset occurs
+        self.data['STKPTR'] = (sp - 1) & 0x0F
+
     def reset(self, cond=None):
         self.data.clear()
         if cond is None or cond == self.reg['NOT_POR']:
@@ -179,10 +214,19 @@ class Pic:
             self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
             self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
 
+        self.data['STKPTR'] = 0x1F
+
     def run(self):
-        for _ in range(30):
+        start = time.clock()
+        while True:
             self.status()
             self.exec()
+
+            # Check for HALT address
+            if (self.pc == 0x7FF):
+                break
+
+        print('runtime: {:0.2f}ms'.format((time.clock() - start) * 1000))
 
     def exec(self):
         ''' exec a single instruction '''
@@ -201,14 +245,25 @@ class Pic:
     def decode(self, word):
         return self.decoder.decode(word)
         
-    def dump(self, address_list):
+    def dump_program(self, address_list):
         for address in address_list:
             print(self.decoder.format(address, self.prog[address]))
 
     def status(self):
-        print('PC:{:02X}{:02X} BS:{:02X} ST:{:05b} W:{:02X} CC:{:d}'.format(self.pch, self.data['PCL'], self.data['BSR'], self.data['STATUS'], self.data['WREG'],
+        print('PC:{:02X}{:02X} SP:{:02X} BS:{:02X} ST:{:05b} W:{:02X} CC:{:d}'.format(self.pch,
+        self.data['PCL'], self.data['STKPTR'], self.data['BSR'], self.data['STATUS'], self.data['WREG'],
         self.cycles))
         
+    def dump_data(self, addresses):
+        for i, address in enumerate(addresses):
+            if i % 8 == 0:
+                print()
+                print('{:04X}: '.format(address), end='')
+
+            print('{:02X} '.format(self.data[address]), end='')
+
+        print()
+
     def dispatch(self, fields):
         ''' dispatch opcode to handler '''
         opcode = fields[1]
@@ -636,13 +691,14 @@ class Decoder:
         else:
             return '{:04x}  {:10}'.format(pc, ins.mnemonic)
 
+
 def twos_complement(input_value, num_bits):
     '''Calculates a two's complement integer from the given input and num bits'''
     mask = 2**(num_bits - 1)
     return -(input_value & mask) + (input_value & ~mask)
 
 def test():
-    d = datamem(256)
+    d = datamem.datamem(256)
 
     d[0x7f] = 5
     d[0xa5] = 4
@@ -673,21 +729,32 @@ def code1(p, d):
         d.encode('NOP'),
         d.encode('NOP'),
         d.encode('NOP'),
-        d.encode('MOVLW', k=0x05),
+        d.encode('MOVLW', k=0x10),
         d.encode('MOVWF', f=0x30),
         d.encode('DECFSZ', d=1, f=0x30),
         d.encode('BRA', k=-2 & 0x1ff),
-        d.encode('RESET')
+
+        d.encode('CALL', k=0x00A),
+
+        d.encode('GOTO', k=0x7FF),
+
+        d.encode('MOVLW', k=0x45),
+        d.encode('MOVWF', f=0x31),
+        d.encode('RETURN')
     ]
 
     p.load_program(0, code)
+    p.dump_program(range(len(code)))
+    print()
  
 def code2(p, d):
     p.load_from_file('test.hex')
 
-decoder = Decoder(insdata.ENHMID)
-p = Pic(decoder, 'p16f1826.inc')
+if __name__ == '__main__':
+    decoder = Decoder(insdata.ENHMID)
+    p = Pic(decoder, 'p16f1826.inc')
 
-code1(p, decoder)
-p.dump(range(30))
-p.run()
+    code1(p, decoder)
+    p.run()
+
+    p.dump_data(range(64))

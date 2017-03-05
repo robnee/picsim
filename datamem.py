@@ -1,7 +1,6 @@
 '''
 implement a Pic's data memory. this includes the quirks of the non-linear address space and 
 common ram regions as well as the special function registers that map to multiple locations.
-Also implements the stack region.
 
 there are 32 banks of 128 bytes in the traditional addressing scheme. the lower 32 bytes of
 each bank is dedicated to special function registers. the first 12 SFR locations in every
@@ -23,14 +22,12 @@ or get a value from the correct region (sfr, gpr)
 import array
 
 MAXRAM = 0x1000
-MAXSTACK = 0x0010 
 
 class DataMem():
     def __init__(self, maxram, reg):
         self.maxram = maxram
         self.sfr = array.array('B')
         self.gpr = array.array('B')
-        self.stack = array.array('H')
         
         # register names
         self.reg = reg
@@ -42,8 +39,6 @@ class DataMem():
         self.sfr = [0 for i in range(0x20 * 0x20)]
         # general purpose ram
         self.gpr = [0 for i in range(self.maxram)]
-        # stack
-        self.stack = [0 for i in range(0x10)]
 
     def translate(self, address):
         ''' translate into bank, location, linear using traditional or linear data addressing '''
@@ -56,8 +51,11 @@ class DataMem():
             bank, location = divmod(address, 0x80)
             if location <= 0x0B:
                 return 0, location, 0
-            if location >= 0x70:
+            elif location >= 0x70:
                 return 0, location, location - 0x20
+            # stack and shadow registers are annoyingly not in SFR space.  As a kludge move them there
+            elif bank == 31 and location >= 0x60:
+                return bank, location - 0x50, location
             else:
                 return bank, location, 0x10 + bank * 0x50 + (location - 0x20)
         elif 0x2000 <= address <= 0x29AF:
@@ -72,7 +70,7 @@ class DataMem():
 
     def __getitem__(self, address):
         bank, location, linear = self.translate(address)
-        #print(hex(bank), hex(location), hex(linear))
+        #print(address, hex(bank), hex(location), hex(linear))
         if location < 0x20:
             return self.sfr[bank * 0x20 + location]
         else:
