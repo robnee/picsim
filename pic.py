@@ -123,6 +123,29 @@ class Pic:
             self.set_pc((self.data[PCLATH] << 8) | value)
         else:
             self.data[address] = value
+            
+    def dump_program(self, address_list):
+        ''' dump program memory '''
+        for address in address_list:
+            print(self.decoder.format(address, self.prog[address]))
+
+    def status(self):
+        ''' print the current state of the processor registers '''
+        print('PC:{:02X}{:02X} SP:{:02X} BS:{:02X}'.format(self.pch, self.data['PCL'], self.data['STKPTR'], self.data['BSR']), end='')
+        
+        print(' TO:{} PD:{} Z:{} DC:{} Z:{}'.format(self.get_bit('STATUS', 'NOT_TO'), self.get_bit('STATUS', 'NOT_PD'), self.z, self.dc, self.c), end='')
+        
+        print(' W:{:02X} CC:{:d}'.format(self.data['WREG'], self.cycles))
+        
+    def dump_data(self, addresses):
+        for i, address in enumerate(addresses):
+            if i % 8 == 0:
+                print()
+                print('{:04X}: '.format(address), end='')
+
+            print('{:02X} '.format(self.data[address]), end='')
+
+        print()
 
     @property        
     def pc(self):
@@ -141,47 +164,60 @@ class Pic:
     @z.setter
     def z(self, value):
         if value:
-            self.data['STATUS'] &= ~(1 << self.reg['Z'])
+            self.set_bit('STATUS', 'Z')
         else:
-            self.data['STATUS'] |= (1 << self.reg['Z'])
+            self.clear_bit('STATUS', 'Z')
 
     @property
     def c(self):
         ''' get STATUS register Z bit as 0 or 1 '''
-        return 1 if self.data['STATUS'] & (1 << self.reg['Z']) else 0
-    
-    @z.setter
+        return self.get_bit('STATUS', 'C')
+
+    @c.setter
     def c(self, value):
         if value:
-            self.data['STATUS'] &= ~(1 << self.reg['C'])
+            self.set_bit('STATUS', 'C')
         else:
-            self.data['STATUS'] |= (1 << self.reg['C'])
+            self.clear_bit('STATUS', 'C')
 
     @property
     def dc(self):
         ''' get STATUS register Z bit as 0 or 1 '''
-        return 1 if self.data['STATUS'] & (1 << self.reg['DC']) else 0
+        return self.get_bit('STATUS', 'DC')
     
-    @z.setter
+    @dc.setter
     def dc(self, value):
         if value:
             self.set_bit('STATUS', self.reg['DC'])
         else:
             self.clear_bit('STATUS', self.reg['DC'])
             
+    def get_bit(self, register, bit_number):
+        ''' get a bit in register specified by number or name '''
+        if isinstance(bit_number, str):
+            bit_number = self.reg[bit_number]
+        return 1 if self.data['STATUS'] & (1 << bit_number) else 0
+        
     def set_bit(self, register, bit_number):
+        ''' set a bit in a register specified by number or name '''
+        if isinstance(bit_number, str):
+            bit_number = self.reg[bit_number]
         self.data[register] |= (1 << bit_number)
 
     def clear_bit(self, register, bit_number):
+        ''' clear a bit in a register specified by number or name '''
+        if isinstance(bit_number, str):
+            bit_number = self.reg[bit_number]
         self.data[register] &= ~(1 << bit_number)
 
     def push(self):
+        ''' push pc onto stack '''
         # get sp
         sp = self.data['STKPTR']
 
         # Set overflow bit
         if sp == 0x0F:
-            self.set_bit('PCON', self.reg['STKOVR'])
+            self.set_bit('PCON', 'STKOVR')
 
         # STVREN is not implemented so stack wraps and no reset occurs
         sp = (sp + 1) & 0x0F
@@ -192,12 +228,13 @@ class Pic:
 
         
     def pop(self):
+        ''' pop value on stack into pc '''
         # get sp
         sp = self.data['STKPTR']
 
         # set underflow bit
         if sp == 0:
-            self.set_bit('PCON', self.reg['STKUNF'])
+            self.set_bit('PCON', 'STKUNF')
 
         # restore return address and update STKPTR
         self.pc = self.stack[sp]
@@ -217,6 +254,7 @@ class Pic:
         self.data['STKPTR'] = 0x1F
 
     def run(self):
+        ''' run until pc == 07FF. i.e. GOTO 0x7FF is HALT '''
         start = time.clock()
         while True:
             self.status()
@@ -245,25 +283,6 @@ class Pic:
     def decode(self, word):
         return self.decoder.decode(word)
         
-    def dump_program(self, address_list):
-        for address in address_list:
-            print(self.decoder.format(address, self.prog[address]))
-
-    def status(self):
-        print('PC:{:02X}{:02X} SP:{:02X} BS:{:02X} ST:{:05b} W:{:02X} CC:{:d}'.format(self.pch,
-        self.data['PCL'], self.data['STKPTR'], self.data['BSR'], self.data['STATUS'], self.data['WREG'],
-        self.cycles))
-        
-    def dump_data(self, addresses):
-        for i, address in enumerate(addresses):
-            if i % 8 == 0:
-                print()
-                print('{:04X}: '.format(address), end='')
-
-            print('{:02X} '.format(self.data[address]), end='')
-
-        print()
-
     def dispatch(self, fields):
         ''' dispatch opcode to handler '''
         opcode = fields[1]
@@ -323,7 +342,14 @@ class Pic:
         
     # opcode implementations
     def _addfsr(self, fields):
-        pass
+        n = fields[5]
+        k = twos_complement(int(fields[7], 2), len(fields[7]))
+        if n == '0':
+            v = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
+            self.data['FSR0H'], self.data['FSR0L'] = divmod(v % 0xFFFF, 0xFF)
+        else:
+            v = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
+            self.data['FSR1H'], self.data['FSR1L'] = divmod(v % 0xFFFF, 0xFF)   
 
     def _addlw(self, fields):
         k = int(fields[7], 2)
@@ -335,10 +361,30 @@ class Pic:
         self.z = not (v & 0xff)
 
     def _addwf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.load(f) + self.data['WREG']
+        r = (self.load(f) & 0x0f) + (self.data['WREG'] & 0x0f)
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
+        self.c = v & 0x100
+        self.dc = r & 0x10
+        self.z = not (v & 0xff)
 
     def _addwfc(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.load(f) + self.data['WREG'] + self.c
+        r = (self.load(f) & 0x0f) + (self.data['WREG'] & 0x0f) + self.c
+        if d == '0':
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
+        self.c = v & 0x100
+        self.dc = r & 0x10
+        self.z = not (v & 0xff)
 
     def _andlw(self, fields):
         k = int(fields[7], 2)
@@ -579,7 +625,7 @@ class Pic:
         if f == '101':
             self.data['TRISA'] = self.data['WREG']
         elif F == '110':
-            self.data['TRIS'] = self.data['WREG']
+            self.data['TRISB'] = self.data['WREG']
 
     def _xorlw(self, fields):
         k = int(fields[7], 2)
@@ -740,7 +786,9 @@ def code1(p, d):
 
         d.encode('MOVLW', k=0x45),
         d.encode('MOVWF', f=0x31),
-        d.encode('RETURN')
+        d.encode('ANDLW', k=0x00),
+        d.encode('RETURN'),
+        
     ]
 
     p.load_program(0, code)
