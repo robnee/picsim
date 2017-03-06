@@ -454,11 +454,11 @@ class Pic:
     def _clrf(self, fields):
         f = int(fields[4], 2)
         self.store(f, 0)
-        self.z = 0
+        self.z = 1
 
     def _clrw(self, fields):
         self.data['WREG'] = 0
-        self.z = 0
+        self.z = 1
 
     def _clrwdt(self, fields):
         pass
@@ -539,10 +539,26 @@ class Pic:
         self.z = v == 0
 
     def _lslf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.load(f)
+        if d == '0':
+            self.data['WREG'] = v << 1
+        else:
+            self.store(f, v << 1)
+        self.c = v & 0x80
+        self.z = not (v & 0x7F)
 
     def _lsrf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.load(f)
+        if d == '0':
+            self.data['WREG'] = v >> 1
+        else:
+            self.store(f, v >> 1)
+        self.c = v & 0x01
+        self.z = not (v & 0xfe)
 
     def _movf(self, fields):
         f = int(fields[4], 2)
@@ -600,10 +616,24 @@ class Pic:
         self.cycles += 1
 
     def _rlf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.load(f)
+        if d == '0':
+            self.data['WREG'] = (v << 1) | self.c
+        else:
+            self.store(f, (v << 1) | self.c)
+        self.c = v & 0x80
 
     def _rrf(self, fields):
-        pass
+        f = int(fields[4], 2)
+        d = fields[3]
+        v = self.load(f)
+        if d == '0':
+            self.data['WREG'] = (self.c << 7) | (v >> 1)
+        else:
+            self.store(f, (self.c << 7) | (v >> 1)
+        self.c = v & 0x01
 
     def _sleep(self, fields):
         pass
