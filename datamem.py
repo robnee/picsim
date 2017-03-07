@@ -50,10 +50,13 @@ class DataMem():
         if 0 <= address <= 0xFFF:
             bank, location = divmod(address, 0x80)
             if location <= 0x0B:
-                return 0, location, 0
-            elif location >= 0x70:
+                return 0, location, None
+            elif location < 0x20:
+                return bank, location, None
+            elif bank == 0 or location >= 0x70:
                 return 0, location, location - 0x20
-            # stack and shadow registers are annoyingly not in SFR space.  As a kludge move them there
+            # stack and shadow registers are annoyingly not in SFR space.  As a kludge move them
+            # there or they will be mapped to gpr
             elif bank == 31 and location >= 0x60:
                 return bank, location - 0x50, location
             else:

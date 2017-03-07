@@ -14,7 +14,6 @@ import time
 import array
 
 import insdata
-import binascii
 import datamem
 
 MAXROM = 0x800
@@ -119,14 +118,15 @@ class Pic:
 
     def set_data(self, address, value):
         ''' handles writing to special locations '''
-        if address < MAXRAM and address & 0x7F == PCL:
-            self.set_pc((self.data[PCLATH] << 8) | value)
+        if address < datamem.MAXRAM and address & 0x7F == self.reg['PCL']:
+            self.set_pc((self.data['PCLATH'] << 8) | value)
         else:
             self.data[address] = value
             
     def dump_program(self, address_list):
         ''' dump program memory '''
         for address in address_list:
+            print(bin(self.prog[address]))
             print(self.decoder.format(address, self.prog[address]))
 
     def status(self):
@@ -632,7 +632,7 @@ class Pic:
         if d == '0':
             self.data['WREG'] = (self.c << 7) | (v >> 1)
         else:
-            self.store(f, (self.c << 7) | (v >> 1)
+            self.store(f, (self.c << 7) | (v >> 1))
         self.c = v & 0x01
 
     def _sleep(self, fields):
@@ -654,7 +654,7 @@ class Pic:
         f = int(fields[4], 2)
         if f == '101':
             self.data['TRISA'] = self.data['WREG']
-        elif F == '110':
+        elif f == '110':
             self.data['TRISB'] = self.data['WREG']
 
     def _xorlw(self, fields):
@@ -778,7 +778,7 @@ def test():
 
     d[0x7f] = 5
     d[0xa5] = 4
-    d[STATUS] = 7
+    d['STATUS'] = 7
 
     print(hex(0x50), d.translate(0x50))
     print(hex(0x125), d.translate(0x125))
@@ -800,6 +800,12 @@ def test():
 
 def code1(p, d):
     ''' Simple countdown loop'''
+    
+    # allow defining variable names in a dict to pass to load program.
+    # load_program will substitute the names before calling encode
+    data = {
+        'x': 0x30,
+    }
     code = [
         d.encode('GOTO', k=0x004),
         d.encode('NOP'),
@@ -818,7 +824,6 @@ def code1(p, d):
         d.encode('MOVWF', f=0x31),
         d.encode('ANDLW', k=0x00),
         d.encode('RETURN'),
-        
     ]
 
     p.load_program(0, code)
@@ -836,3 +841,9 @@ if __name__ == '__main__':
     p.run()
 
     p.dump_data(range(64))
+    
+    print(decoder.format(1, 0b00000001100001))
+    print(decoder.format(2, 0b01100110011101))
+    print(decoder.format(3, 0b00100110010110))
+    print(decoder.format(4, 0b11111000100101))
+    print(decoder.format(5, 0b11000101011011))
