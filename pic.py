@@ -126,8 +126,7 @@ class Pic:
     def dump_program(self, address_list):
         ''' dump program memory '''
         for address in address_list:
-            print(bin(self.prog[address]))
-            print(self.decoder.format(address, self.prog[address]))
+            print('{:04X}  '.format(address), self.decoder.format(self.prog[address]))
 
     def status(self):
         ''' print the current state of the processor registers '''
@@ -138,14 +137,7 @@ class Pic:
         print(' W:{:02X} CC:{:d}'.format(self.data['WREG'], self.cycles))
         
     def dump_data(self, addresses):
-        for i, address in enumerate(addresses):
-            if i % 8 == 0:
-                print()
-                print('{:04X}: '.format(address), end='')
-
-            print('{:02X} '.format(self.data[address]), end='')
-
-        print()
+        self.data.dump(addresses)
 
     @property        
     def pc(self):
@@ -253,27 +245,30 @@ class Pic:
 
         self.data['STKPTR'] = 0x1F
 
-    def run(self):
+    def run(self, verbose=False):
         ''' run until pc == 07FF. i.e. GOTO 0x7FF is HALT '''
         start = time.clock()
         while True:
-            self.status()
-            self.exec()
+            if verbose:
+                self.status()
+            self.exec(verbose)
 
             # Check for HALT address
             if (self.pc == 0x7FF):
                 break
 
-        print('runtime: {:0.2f}ms'.format((time.clock() - start) * 1000))
+        if verbose:
+            print('runtime: {:0.2f}ms'.format((time.clock() - start) * 1000))
 
-    def exec(self):
+    def exec(self, verbose=False):
         ''' exec a single instruction '''
  
         word = self.prog[self.pc]
         fields = self.decode(word)
 
         # display instruction
-        print(self.decoder.format(self.pc, word))
+        if verbose:
+            print('{:04X}  '.format(self.pc), self.decoder.format(word))
 
         self.cycles += 1
         self.pc += 1
@@ -747,55 +742,31 @@ class Decoder:
         # convert from string to numeric
         return int(bits, 2)
 
-    def format(self, pc, word):
+    def format(self, word):
         fields = self.decode(word)
         ins, opcode, b, d, f, n, m, k = fields
 
         if len(f) and len(d):
             sd = 'W' if d == '0' else 'F'
-            return '{:04x}  {:10} 0x{:02x}, {}'.format(pc, ins.mnemonic, int(f, 2), sd)
+            return '{:10} 0x{:02x}, {}'.format(ins.mnemonic, int(f, 2), sd)
         elif len(f) and len(b):
-            return '{:04x}  {:10} 0x{:02x}, {}'.format(pc, ins.mnemonic, int(f, 2), b)
+            return '{:10} 0x{:02x}, {}'.format(ins.mnemonic, int(f, 2), b)
         elif len(f):
-            return '{:04x}  {:10} 0x{:02x}'.format(pc, ins.mnemonic, int(f, 2))
+            return '{:10} 0x{:02x}'.format(ins.mnemonic, int(f, 2))
         elif len(n) and len(k):
-            return '{:04x}  {:10} FSR{}, 0x{:02x}'.format(pc, ins.mnemonic, n, int(k, 2))
+            return '{:10} FSR{}, 0x{:02x}'.format(ins.mnemonic, n, int(k, 2))
         elif len(k) > 8:
-            return '{:04x}  {:10} 0x{:03x}'.format(pc, ins.mnemonic, int(k, 2))
+            return '{:10} 0x{:03x}'.format(ins.mnemonic, int(k, 2))
         elif len(k):
-            return '{:04x}  {:10} 0x{:02x}'.format(pc, ins.mnemonic, int(k, 2))
+            return '{:10} 0x{:02x}'.format(ins.mnemonic, int(k, 2))
         else:
-            return '{:04x}  {:10}'.format(pc, ins.mnemonic)
+            return '{:10}'.format(ins.mnemonic)
 
 
 def twos_complement(input_value, num_bits):
     '''Calculates a two's complement integer from the given input and num bits'''
     mask = 2**(num_bits - 1)
     return -(input_value & mask) + (input_value & ~mask)
-
-def test():
-    d = datamem.datamem(256)
-
-    d[0x7f] = 5
-    d[0xa5] = 4
-    d['STATUS'] = 7
-
-    print(hex(0x50), d.translate(0x50))
-    print(hex(0x125), d.translate(0x125))
-    print(hex(0x1ff), d.translate(0x1ff), d[0x1ff])
-    print(hex(0xa5), d.translate(0xa5), d[0xa5])
-    print(hex(0x2055), d.translate(0x2055), d[0x2055])
-    print(hex(0x204f), d.translate(0x204f), d[0x204f])
-    print(hex(0x2050), d.translate(0x2050), d[0x2050])
-    
-    print(decoder.format(1, 0b00000001100001))
-    print(decoder.format(2, 0b01100110011101))
-    print(decoder.format(3, 0b00100110010110))
-    print(decoder.format(4, 0b11111000100101))
-    print(decoder.format(5, 0b11000101011011))
-    
-    x = decoder.encode('GOTO', k=0x65)
-    print(decoder.format(0, x))
 
 
 def code1(p, d):
@@ -832,18 +803,21 @@ def code1(p, d):
  
 def code2(p, d):
     p.load_from_file('test.hex')
+    
+def code3(p):
+    d = p.decoder
+    
+    p.load = [
+        d.encode('MOVLW', k=0x10),
+    ]
+    
 
 if __name__ == '__main__':
     decoder = Decoder(insdata.ENHMID)
     p = Pic(decoder, 'p16f1826.inc')
 
     code1(p, decoder)
-    p.run()
+    p.run(verbose=True)
 
     p.dump_data(range(64))
-    
-    print(decoder.format(1, 0b00000001100001))
-    print(decoder.format(2, 0b01100110011101))
-    print(decoder.format(3, 0b00100110010110))
-    print(decoder.format(4, 0b11111000100101))
-    print(decoder.format(5, 0b11000101011011))
+

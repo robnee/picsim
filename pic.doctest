@@ -50,7 +50,21 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
     >>> d.translate(0x2055)
     (1, 37, 101)
 
-  
+# test register name addressing storage, retrieval, and dumping
+    >>> n = {'X': 0x92, 'Y': 0x95}
+    >>> d = datamem.DataMem(256, n)
+    >>> d[0x92] = 55
+    >>> d['X']
+    55
+    >>> d['Y'] = d['X']
+    >>> d[0x95]
+    55
+    >>> d.dump(range(0x90, 0x98))
+    0090: 00 00 37 00 00 37 00 00 
+
+    >>> print('88 88 ')
+    88 88 
+    
 # Tests encoding instructions
     >>> import pic, insdata
     >>> d = pic.Decoder(insdata.ENHMID)
@@ -72,13 +86,13 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
     '0b10111111111111'
 
 # test instruction decoding and formatting
-    >>> d.format(1, 0b00000001100001)
-    '0001  TRIS       0x01'
-    >>> d.format(2, 0b01100110011101)
-    '0002  BTFSC      0x1d, 011'
-    >>> d.format(3, 0b00100110010110)
-    '0003  COMF       0x16, F'
-    >>> d.format(4, 0b11111000100101)
-    '0004  ADDLW      0x25'
-    >>> d.format(5, 0b11000101011011)
-    '0005  ADDFSR     FSR1, 0x1b'
+    >>> d.format(0b00000001100001)
+    'TRIS       0x01'
+    >>> d.format(0b01100110011101)
+    'BTFSC      0x1d, 011'
+    >>> d.format(0b00100110010110)
+    'COMF       0x16, F'
+    >>> d.format(0b11111000100101)
+    'ADDLW      0x25'
+    >>> d.format(0b11000101011011)
+    'ADDFSR     FSR1, 0x1b'

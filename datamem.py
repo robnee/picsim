@@ -86,3 +86,11 @@ class DataMem():
             self.sfr[bank * 0x20 + location] = value & 0xFF
         else:
             self.gpr[linear] = value & 0xFF
+            
+    def dump(self, addresses):
+        for i, address in enumerate(addresses):
+            if i % 8 == 0:
+                print('{:04X}: '.format(address), end='')
+            print('{:02X} '.format(self[address]), end='')
+            if i % 8 == 7:
+                print()
