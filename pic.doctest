@@ -68,31 +68,31 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
 # Tests encoding instructions
     >>> import pic, insdata
     >>> d = pic.Decoder(insdata.ENHMID)
-    >>> bin(d.encode('GOTO', k=0x004))
-    '0b10100000000100'
-    >>> bin(d.encode('NOP'))
-    '0b0'
-    >>> bin(d.encode('MOVLW', k=0x10))
-    '0b11000000010000'
-    >>> bin(d.encode('MOVWF', f=0x30))
-    '0b10110000'
-    >>> bin(d.encode('DECFSZ', d=1, f=0x30))
-    '0b101110110000'
-    >>> bin(d.encode('BRA', k=-2 & 0x1ff))
-    '0b11001111111110'
-    >>> bin(d.encode('CALL', k=0x00A))
-    '0b10000000001010'
-    >>> bin(d.encode('GOTO', k=0x7FF))
-    '0b10111111111111'
+    >>> d.encode('GOTO', k=0x004).to_bits()
+    '10100000000100'
+    >>> d.encode('NOP').to_bits()
+    '00000000000000'
+    >>> d.encode('MOVLW', k=0x10).to_bits()
+    '11000000010000'
+    >>> d.encode('MOVWF', f=0x30).to_bits()
+    '00000010110000'
+    >>> d.encode('DECFSZ', d=1, f=0x30).to_bits()
+    '00101110110000'
+    >>> d.encode('BRA', k=-2 & 0x1ff).to_bits()
+    '11001111111110'
+    >>> d.encode('CALL', k=0x00A).to_bits()
+    '10000000001010'
+    >>> d.encode('GOTO', k=0x7FF).to_bits()
+    '10111111111111'
 
 # test instruction decoding and formatting
-    >>> d.format(0b00000001100001)
-    'TRIS       0x01'
-    >>> d.format(0b01100110011101)
-    'BTFSC      0x1d, 011'
-    >>> d.format(0b00100110010110)
-    'COMF       0x16, F'
-    >>> d.format(0b11111000100101)
-    'ADDLW      0x25'
-    >>> d.format(0b11000101011011)
-    'ADDFSR     FSR1, 0x1b'
+    >>> print(d.decode(0b00000001100001))
+    TRIS       0x01
+    >>> print(d.decode(0b01100110011101))
+    BTFSC      0x1d, 3
+    >>> print(d.decode(0b00100110010110))
+    COMF       0x16, F
+    >>> print(d.decode(0b11111000100101))
+    ADDLW      0x25
+    >>> print(d.decode(0b11000101011011))
+    ADDFSR     FSR1, 0x1b

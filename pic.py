@@ -17,7 +17,7 @@ import insdata
 import datamem
 
 MAXROM = 0x800
-MAXSTACK = 0x0010 
+MAXSTACK = 0x0010
 
 
 class Pic:
@@ -26,8 +26,7 @@ class Pic:
         
         # load include file with reg definitions
         self.load_inc_file(incfile)
-        
-        self.prog = array.array('H')
+
         self.stack = array.array('H')
         self.data = datamem.DataMem(256, self.reg)
         self.clear()
@@ -41,7 +40,7 @@ class Pic:
         self.decoder = decoder
 
     def load_inc_file(self, filename):
-        ''' load the register and config word definitions from .inc file and build a dict'''
+        ''' load the register and config word definitions from .inc file and build a dict '''
         
         with open(filename) as fp:
             self.reg = {}
@@ -55,7 +54,7 @@ class Pic:
     def clear(self):
         ''' clear memory '''
         # special function registers
-        self.prog = [0 for i in range(MAXROM)]
+        self.prog = [None for i in range(MAXROM)]
         # stack
         self.stack = [0 for i in range(MAXSTACK)]
 
@@ -111,11 +110,27 @@ class Pic:
         ''' load data from banked memory '''
         address = self.data['BSR'] + f
         return self.data[address]
+    
+    def load_indirect(self, address):
+        ''' inderect adressing which can access fraditional, linear and program mem '''
+        if 0x8000 <= address < 0x8000 + MAXROM:
+            ins = self.prog[address - 0x8000]
+            word = int(ins.to_bits(), 2) if ins else 0
+            return word & 0xFF
+        elif address < 0x29B0:
+            return self.data[address]
+        else:
+            return 0
 
     def store(self, f, value):
+        ''' banked store '''
         address = self.data['BSR'] + f
         self.data[address] = value
 
+    def store_indirect(self, address, value):
+        if address < 0x29B0:
+            self.data[address] = value
+        
     def set_data(self, address, value):
         ''' handles writing to special locations '''
         if address < datamem.MAXRAM and address & 0x7F == self.reg['PCL']:
@@ -126,20 +141,20 @@ class Pic:
     def dump_program(self, address_list):
         ''' dump program memory '''
         for address in address_list:
-            print('{:04X}  '.format(address), self.decoder.format(self.prog[address]))
+            print('{:04X}  '.format(address), self.prog[address])
 
     def status(self):
         ''' print the current state of the processor registers '''
         print('PC:{:02X}{:02X} SP:{:02X} BS:{:02X}'.format(self.pch, self.data['PCL'], self.data['STKPTR'], self.data['BSR']), end='')
         
-        print(' TO:{} PD:{} Z:{} DC:{} Z:{}'.format(self.get_bit('STATUS', 'NOT_TO'), self.get_bit('STATUS', 'NOT_PD'), self.z, self.dc, self.c), end='')
+        print(' TO:{} PD:{} Z:{} DC:{} C:{}'.format(self.get_bit('STATUS', 'NOT_TO'), self.get_bit('STATUS', 'NOT_PD'), self.z, self.dc, self.c), end='')
         
         print(' W:{:02X} CC:{:d}'.format(self.data['WREG'], self.cycles))
         
     def dump_data(self, addresses):
         self.data.dump(addresses)
 
-    @property        
+    @property
     def pc(self):
         ''' get the value of the program counter '''
         return (self.pch << 8) | self.data['PCL']
@@ -218,7 +233,6 @@ class Pic:
         self.stack[sp] = self.pc
         self.data['STKPTR'] = sp
 
-        
     def pop(self):
         ''' pop value on stack into pc '''
         # get sp
@@ -263,24 +277,19 @@ class Pic:
     def exec(self, verbose=False):
         ''' exec a single instruction '''
  
-        word = self.prog[self.pc]
-        fields = self.decode(word)
+        ins = self.prog[self.pc]
 
         # display instruction
         if verbose:
-            print('{:04X}  '.format(self.pc), self.decoder.format(word))
+            print('{:04X}  '.format(self.pc), ins)
 
         self.cycles += 1
         self.pc += 1
         
-        self.dispatch(fields) 
+        self.dispatch(ins)
 
-    def decode(self, word):
-        return self.decoder.decode(word)
-        
-    def dispatch(self, fields):
+    def dispatch(self, ins):
         ''' dispatch opcode to handler '''
-        opcode = fields[1]
         return {
             '1100010': self._addfsr,
             '111110': self._addlw,
@@ -311,12 +320,14 @@ class Pic:
             '110101': self._lslf,
             '110110': self._lsrf,
             '001000': self._movf,
-            '1111110': self._moviw,
+            '1111110': self._moviwk,
+            '00000000010': self._moviwm,
             '000000001': self._movlb,
             '1100011': self._movlp,
             '110000': self._movlw,
             '0000001': self._movwf,
-            '111111': self._movwi,
+            '1111111': self._movwik,
+            '00000000011': self._movwim,
             '00000000000000': self._nop,
             '00000001100010': self._option,
             '00000000000001': self._reset,
@@ -333,34 +344,31 @@ class Pic:
             '00000001100': self._tris,
             '111010': self._xorlw,
             '000110': self._xorwf,
-        }[opcode](fields)
+        }[ins.opcode](ins)
         
     # opcode implementations
-    def _addfsr(self, fields):
-        n = fields[5]
-        k = twos_complement(int(fields[7], 2), len(fields[7]))
-        if n == '0':
+    def _addfsr(self, ins):
+        k = twos_complement(ins.k, 6)
+        if ins.n == 0:
             v = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
             self.data['FSR0H'], self.data['FSR0L'] = divmod(v % 0xFFFF, 0xFF)
         else:
             v = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
-            self.data['FSR1H'], self.data['FSR1L'] = divmod(v % 0xFFFF, 0xFF)   
+            self.data['FSR1H'], self.data['FSR1L'] = divmod(v % 0xFFFF, 0xFF)
 
-    def _addlw(self, fields):
-        k = int(fields[7], 2)
-        v = self.data['WREG'] + k
-        r = (self.data['WREG'] & 0x0f) + (k & 0xf)
+    def _addlw(self, ins):
+        v = self.data['WREG'] + ins.k
+        r = (self.data['WREG'] & 0x0f) + (ins.k & 0xf)
         self.data['WREG'] = v
         self.c = v & 0x100
         self.dc = r & 0x10
         self.z = not (v & 0xff)
 
-    def _addwf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _addwf(self, ins):
+        f = ins.f
         v = self.load(f) + self.data['WREG']
         r = (self.load(f) & 0x0f) + (self.data['WREG'] & 0x0f)
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
@@ -368,12 +376,11 @@ class Pic:
         self.dc = r & 0x10
         self.z = not (v & 0xff)
 
-    def _addwfc(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _addwfc(self, ins):
+        f = ins.f
         v = self.load(f) + self.data['WREG'] + self.c
         r = (self.load(f) & 0x0f) + (self.data['WREG'] & 0x0f) + self.c
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
@@ -381,108 +388,94 @@ class Pic:
         self.dc = r & 0x10
         self.z = not (v & 0xff)
 
-    def _andlw(self, fields):
-        k = int(fields[7], 2)
-        v = self.data['WREG'] & k
+    def _andlw(self, ins):
+        v = self.data['WREG'] & ins.k
         self.data['WREG'] = v
         self.z = v == 0
 
-    def _andwf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _andwf(self, ins):
+        f = ins.f
         v = self.load(f) & self.data['WREG']
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
         self.z = v == 0
 
-    def _asrf(self, fields):
+    def _asrf(self, ins):
         pass
 
-    def _bcf(self, fields):
-        f = int(fields[4], 2)
-        b = int(fields[2], 2)
-        v = self.load(f) & ~(1 << b)
+    def _bcf(self, ins):
+        f = ins.f
+        v = self.load(f) & ~(1 << ins.b)
         self.store(f, v)
 
-    def _bra(self, fields):
-        k = int(fields[7], 2)
-        self.pc += twos_complement(k, len(fields[7]))
+    def _bra(self, ins):
+        self.pc += twos_complement(ins.k, 9)
         self.cycles += 1
 
-    def _brw(self, fields):
+    def _brw(self, ins):
         self.pc += self.data['WREG']
         self.cycles += 1
 
-    def _bsf(self, fields):
-        f = int(fields[4], 2)
-        b = int(fields[2], 2)
-        v = self.load(f) | (1 << b)
+    def _bsf(self, ins):
+        f = ins.f
+        v = self.load(f) | (1 << ins.b)
         self.store(f, v)
 
-    def _btfsc(self, fields):
-        f = int(fields[4], 2)
-        b = int(fields[2], 2)
-        if not self.load(f) & (1 << b):
+    def _btfsc(self, ins):
+        if not self.load(ins.f) & (1 << ins.b):
             self.pc += 1
             self.cycles += 1
 
-    def _btfss(self, fields):
-        f = int(fields[4], 2)
-        b = int(fields[2], 2)
-        if self.load(f) & (1 << b):
+    def _btfss(self, ins):
+        if self.load(ins.f) & (1 << ins.b):
             self.pc += 1
             self.cycles += 1
 
-    def _call(self, fields):
-        k = int(fields[7], 2)
+    def _call(self, ins):
         self.push()
-        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | k
+        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | ins.k
         self.cycles += 1
 
-    def _callw(self, fields):
+    def _callw(self, ins):
         self.push()
         self.pc = (self.data['PCLATH'] & 0b01111111 << 8) | self.data['WREG']
         self.cycles += 1
 
-    def _clrf(self, fields):
-        f = int(fields[4], 2)
-        self.store(f, 0)
+    def _clrf(self, ins):
+        self.store(ins.f, 0)
         self.z = 1
 
-    def _clrw(self, fields):
+    def _clrw(self, ins):
         self.data['WREG'] = 0
         self.z = 1
 
-    def _clrwdt(self, fields):
+    def _clrwdt(self, ins):
         pass
 
-    def _comf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _comf(self, ins):
+        f = ins.f
         v = (self.load(f) - 1) & 0xFF
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
         self.z = v == 0
 
-    def _decf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _decf(self, ins):
+        f = ins.f
         v = (~self.load(f)) & 0xFF
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
         self.z = v == 0
 
-    def _decfsz(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _decfsz(self, ins):
+        f = ins.f
         v = (self.load(f) - 1) & 0xFF
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
@@ -490,26 +483,23 @@ class Pic:
             self.pc += 1
             self.cycles += 1
 
-    def _goto(self, fields):
-        k = int(fields[7], 2)
-        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | k
+    def _goto(self, ins):
+        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | ins.k
         self.cycles += 1
 
-    def _incf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _incf(self, ins):
+        f = ins.f
         v = (self.load(f) + 1) & 0xFF
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
         self.z = v == 0
 
-    def _incfsz(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _incfsz(self, ins):
+        f = ins.f
         v = (self.load(f) + 1) & 0xFF
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
@@ -517,152 +507,215 @@ class Pic:
             self.pc += 1
             self.cycles += 1
 
-    def _iorlw(self, fields):
-        k = int(fields[7], 2)
-        v = self.data['WREG'] | k
+    def _iorlw(self, ins):
+        v = self.data['WREG'] | ins.k
         self.data['WREG'] = v
         self.z = v == 0
 
-    def _iorwf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _iorwf(self, ins):
+        f = ins.f
         v = self.load(f) | self.data['WREG']
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
         self.z = v == 0
 
-    def _lslf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _lslf(self, ins):
+        f = ins.f
         v = self.load(f)
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v << 1
         else:
             self.store(f, v << 1)
         self.c = v & 0x80
         self.z = not (v & 0x7F)
 
-    def _lsrf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _lsrf(self, ins):
+        f = ins.f
         v = self.load(f)
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v >> 1
         else:
             self.store(f, v >> 1)
         self.c = v & 0x01
         self.z = not (v & 0xfe)
 
-    def _movf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _movf(self, ins):
+        f = ins.f
         v = self.load(f)
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
-        self.z = v
+        self.z = v == 0
 
-    def _moviw(self, fields):
+    def _moviwk(self, ins):
+        k = twos_complement(ins.k, 6)
+        if ins.n == 0:
+            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
+        else:
+            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
+        v = self.load_indirect(a)
+        self.data['WREG'] = v
+        self.z = v == 0
         pass
 
-    def _movlb(self, fields):
-        k = int(fields[7], 2)
-        self.data['BSR'] = k
+    def _moviwm(self, ins):
+        m = ins.m
+        if ins.n == 0:
+            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L'])
+        else:
+            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L'])
+        if m == 0:
+            a += 1
+        elif m == 1:
+            a -= 1
+        v = self.load_indirect(a)
+        self.data['WREG'] = v
+        self.z = v == 0
+        if m == 2:
+            a += 1
+        elif m == 3:
+            a -= 1
+        if ins.n == 0:
+            self.data['FSR0H'], self.data['FSR0L'] = divmod(a % 0xFFFF, 0xFF)
+        else:
+            self.data['FSR1H'], self.data['FSR1L'] = divmod(a % 0xFFFF, 0xFF)
 
-    def _movlp(self, fields):
-        k = int(fields[7], 2)
-        self.data['PCLATH'] = k
+    def _movlb(self, ins):
+        self.data['BSR'] = ins.k
 
-    def _movlw(self, fields):
-        k = int(fields[7], 2)
-        self.data['WREG'] = k
+    def _movlp(self, ins):
+        self.data['PCLATH'] = ins.k
 
-    def _movwf(self, fields):
-        f = int(fields[4], 2)
+    def _movlw(self, ins):
+        self.data['WREG'] = ins.k
+
+    def _movwf(self, ins):
+        f = ins.f
         v = self.data['WREG']
         self.store(f, v)
 
-    def _movwi(self, fields):
+    def _movwik(self, ins):
+        k = twos_complement(ins.k, 6)
+        if ins.n == 0:
+            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
+        else:
+            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
+        self.store_indirect(a, self.data['WREG'])
+
+    def _movwim(self, ins):
+        m = ins.m
+        if ins.n == 0:
+            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L'])
+        else:
+            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L'])
+        if m == 0:
+            a += 1
+        elif m == 1:
+            a -= 1
+        self.store_indirect(a, self.data['WREG'])
+        if m == 2:
+            a += 1
+        elif m == 3:
+            a -= 1
+        if ins.n == 0:
+            self.data['FSR0H'], self.data['FSR0L'] = divmod(a % 0xFFFF, 0xFF)
+        else:
+            self.data['FSR1H'], self.data['FSR1L'] = divmod(a % 0xFFFF, 0xFF)
+
+    def _nop(self, ins):
         pass
 
-    def _nop(self, fields):
-        pass
+    def _option(self, ins):
+        self.data['OPTION'] = self.data['WREG']
 
-    def _option(self, fields):
-        self.data['OPTION' ] = self.data['WREG']
-
-    def _reset(self, fields):
+    def _reset(self, ins):
         self.reset(self.reg['NOT_RI'])
         
-    def _retfie(self, fields):
-        pass
+    def _retfie(self, ins):
+        self.pop()
+        self.set_bit('INTCON', 'GIE')
+        self.cycles += 1
 
-    def _retlw(self, fields):
-        k = int(fields[7], 2)
-        self.data['WREG'] = k
+    def _retlw(self, ins):
+        self.data['WREG'] = ins.k
         self.pop()
         self.cycles += 1
 
-    def _return(self, fields):
+    def _return(self, ins):
         self.pop()
         self.cycles += 1
 
-    def _rlf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _rlf(self, ins):
+        f = ins.f
         v = self.load(f)
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = (v << 1) | self.c
         else:
             self.store(f, (v << 1) | self.c)
         self.c = v & 0x80
 
-    def _rrf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _rrf(self, ins):
+        f = ins.f
         v = self.load(f)
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = (self.c << 7) | (v >> 1)
         else:
             self.store(f, (self.c << 7) | (v >> 1))
         self.c = v & 0x01
 
-    def _sleep(self, fields):
+    def _sleep(self, ins):
         pass
 
-    def _sublw(self, fields):
+    def _sublw(self, ins):
+        v = (-self.data['WREG']) & 0xFF + ins.k
+        r = (-self.data['WREG']) & 0x0F + (ins.k & 0x0F)
+        self.data['WREG'] = v
+        self.c = v & 0x100
+        self.dc = r & 0x10
+        self.z = not (v & 0xff)
         pass
 
-    def _subwf(self, fields):
+    def _subwf(self, ins):
+        f = ins.f
+        v = (-self.data['WREG']) & 0xFF + self.load(f)
+        r = (-self.data['WREG']) & 0x0F + (self.load(f) & 0x0F)
+        if ins.d == 0:
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
+        self.c = v & 0x100
+        self.dc = r & 0x10
+        self.z = not (v & 0xff)
+
+    def _subwfb(self, ins):
         pass
 
-    def _subwfb(self, fields):
-        pass
+    def _swapf(self, ins):
+        f = ins.f
+        v = self.load(f)
+        if ins.d == 0:
+            self.data['WREG'] = (v << 4) & 0xFF | (v >> 4)
+        else:
+            self.store((v << 4) & 0xFF | (v >> 4))
 
-    def _swapf(self, fields):
-        pass
-
-    def _tris(self, fields):
-        f = int(fields[4], 2)
-        if f == '101':
+    def _tris(self, ins):
+        if ins.f == 0b101:
             self.data['TRISA'] = self.data['WREG']
-        elif f == '110':
+        elif ins.f == 0b110:
             self.data['TRISB'] = self.data['WREG']
 
-    def _xorlw(self, fields):
-        k = int(fields[7], 2)
-        v = self.data['WREG'] ^ k
+    def _xorlw(self, ins):
+        v = self.data['WREG'] ^ ins.k
         self.data['WREG'] = v
         self.z = v == 0
 
-    def _xorwf(self, fields):
-        f = int(fields[4], 2)
-        d = fields[3]
+    def _xorwf(self, ins):
+        f = ins.f
         v = self.load(f) ^ self.data['WREG']
-        if d == '0':
+        if ins.d == 0:
             self.data['WREG'] = v
         else:
             self.store(f, v)
@@ -694,6 +747,48 @@ class InstructionInfo:
         return s
 
 
+class Instruction:
+    def __init__(self, info, fields):
+        self.info = info
+        self.fields = fields
+        assert len(fields) == 7
+    
+    def __getattr__(self, name):
+        i = InstructionInfo.field_list.index(name)
+        return self.fields[i]
+    
+    def to_bits(self):
+        bits = self.info.opcode
+        
+        # build instruction from fields starting after opcode
+        for i, field_name in enumerate(InstructionInfo.field_list[1:]):
+            x, y = self.info.field_spans[i + 1]
+            value = getattr(self, field_name)
+            if value is not None:
+                bits += '{:0{}b}'.format(value, y - x)
+
+        return bits
+    
+    def __str__(self):
+        opcode, b, d, f, n, m, k = self.fields
+
+        if f is not None and d is not None:
+            sd = 'W' if d == 0 else 'F'
+            return '{:10} 0x{:02x}, {}'.format(self.info.mnemonic, f, sd)
+        elif f is not None and b is not None:
+            return '{:10} 0x{:02x}, {}'.format(self.info.mnemonic, f, b)
+        elif f is not None:
+            return '{:10} 0x{:02x}'.format(self.info.mnemonic, f)
+        elif n is not None and k is not None:
+            return '{:10} FSR{}, 0x{:02x}'.format(self.info.mnemonic, n, k)
+        elif k is not None:
+            x, y = self.info.field_spans[6]
+            width = 4 if y - x > 8 else 2
+            return '{:10} 0x{:0{}X}'.format(self.info.mnemonic, k, width)
+        else:
+            return '{:10}'.format(self.info.mnemonic)
+
+
 class Decoder:
     ''' Decodes and encodes instructions from/to 14 bit program words'''
         
@@ -708,7 +803,7 @@ class Decoder:
             self.mnemonic_dict[ins.mnemonic] = ins
 
     def decode(self, word):
-        ''' return a tuple of ins, opcode, b, d, f, n, m, k '''
+        ''' return an Instruction consisting of info and tuple (opcode, b, d, f, n, m, k) '''
 
         # convert program word to a bit string
         bits = '{:014b}'.format(word)
@@ -716,51 +811,36 @@ class Decoder:
         # the instruction word starts with the instruction opcode.  Use a generator
         # comprehension to find match.  It returns a list so use a comma on the lhs
         # to force an unpack.  An exception is thrown if no or multiple matches
-        ins, = [item for item in self.ins_list if bits.startswith(item.opcode)]
+        info, = [item for item in self.ins_list if bits.startswith(item.opcode)]
 
-        #print(mnemonic, ins.opcode, ins.field_spans, bits)
-        return (ins,) + tuple(bits[x:y] for x, y in ins.field_spans)
-
-#        for k in sorted(self.ins_ref):
-#            i= self.ins_ref[k]
-#            print('    def _{}(self):\n        pass\n'.format(i.mnemonic.lower()))
+        # build list of fields
+        l = []
+        for x, y in info.field_spans:
+            if x != y:
+                l.append(int(bits[x:y], 2))
+            else:
+                l.append(None)
+      
+        return Instruction(info, tuple(l))
 
     def encode(self, mnemonic, **kwargs):
-        # find matching mnemonic in instruction table
-        ins = self.mnemonic_dict[mnemonic.upper()]
+        info = self.mnemonic_dict[mnemonic.upper()]
 
-        bits = ins.opcode
-
+        fields = []
+        
         # build instruction from fields starting after opcode
         for i, field_name in enumerate(InstructionInfo.field_list):
-            x, y = ins.field_spans[i]
-            if field_name in kwargs:
-                bits += '{:0{}b}'.format(kwargs[field_name], y - x)
+            x, y = info.field_spans[i]
+            if field_name == 'opcode':
+                fields.append(info.opcode)
+            elif field_name in kwargs:
+                fields.append(kwargs[field_name])
             elif field_name != 'opcode' and x != y:
                 raise IndexError('{} {}:{} missing'.format(field_name, x, y))
+            else:
+                fields.append(None)
         
-        # convert from string to numeric
-        return int(bits, 2)
-
-    def format(self, word):
-        fields = self.decode(word)
-        ins, opcode, b, d, f, n, m, k = fields
-
-        if len(f) and len(d):
-            sd = 'W' if d == '0' else 'F'
-            return '{:10} 0x{:02x}, {}'.format(ins.mnemonic, int(f, 2), sd)
-        elif len(f) and len(b):
-            return '{:10} 0x{:02x}, {}'.format(ins.mnemonic, int(f, 2), b)
-        elif len(f):
-            return '{:10} 0x{:02x}'.format(ins.mnemonic, int(f, 2))
-        elif len(n) and len(k):
-            return '{:10} FSR{}, 0x{:02x}'.format(ins.mnemonic, n, int(k, 2))
-        elif len(k) > 8:
-            return '{:10} 0x{:03x}'.format(ins.mnemonic, int(k, 2))
-        elif len(k):
-            return '{:10} 0x{:02x}'.format(ins.mnemonic, int(k, 2))
-        else:
-            return '{:10}'.format(ins.mnemonic)
+        return Instruction(info, tuple(fields))
 
 
 def twos_complement(input_value, num_bits):
@@ -775,16 +855,17 @@ def code1(p, d):
     # allow defining variable names in a dict to pass to load program.
     # load_program will substitute the names before calling encode
     data = {
-        'x': 0x30,
+        'x': 0x20,
+        'y': 0x21,
     }
     code = [
         d.encode('GOTO', k=0x004),
         d.encode('NOP'),
         d.encode('NOP'),
         d.encode('NOP'),
-        d.encode('MOVLW', k=0x10),
-        d.encode('MOVWF', f=0x30),
-        d.encode('DECFSZ', d=1, f=0x30),
+        d.encode('MOVLW', k=0x50),
+        d.encode('MOVWF', f=data['x']),
+        d.encode('DECFSZ', d=1, f=data['x']),
         d.encode('BRA', k=-2 & 0x1ff),
 
         d.encode('CALL', k=0x00A),
@@ -792,7 +873,7 @@ def code1(p, d):
         d.encode('GOTO', k=0x7FF),
 
         d.encode('MOVLW', k=0x45),
-        d.encode('MOVWF', f=0x31),
+        d.encode('MOVWF', f=data['y']),
         d.encode('ANDLW', k=0x00),
         d.encode('RETURN'),
     ]
@@ -800,24 +881,54 @@ def code1(p, d):
     p.load_program(0, code)
     p.dump_program(range(len(code)))
     print()
- 
-def code2(p, d):
-    p.load_from_file('test.hex')
-    
-def code3(p):
-    d = p.decoder
-    
-    p.load = [
-        d.encode('MOVLW', k=0x10),
-    ]
+    p.run(verbose=True) 
+    p.dump_data(range(0x20, 0x30))
     
 
+def code2(p, d):
+    # this should use the decoder
+    p.load_from_file('test.hex')
+
+    
+def code3(p, d):
+    d = p.decoder
+    
+    code = [
+        d.encode('MOVLW', k=0x47),
+        d.encode('MOVWF', f=0x20),
+        d.encode('SWAPF', f=0x20, d=0),
+        
+        d.encode('GOTO', k=0x7FF),
+    ]
+    
+    p.load_program(0, code)
+    p.dump_program(range(len(code)))
+    print()
+    p.run(verbose=True) 
+    p.dump_data(range(0x20, 0x30))
+
+
+def code4(p, d):
+    d = p.decoder
+    
+    code = [
+        d.encode('MOVLW', k=0x10),
+        d.encode('SUBLW', k=0x20),
+        d.encode('MOVWF', f=0x20),
+        
+        d.encode('GOTO', k=0x7FF),
+    ]
+    
+    p.load_program(0, code)
+    p.dump_program(range(len(code)))
+    print()
+    p.run(verbose=True) 
+    p.dump_data(range(0x20, 0x30))
+      
 if __name__ == '__main__':
     decoder = Decoder(insdata.ENHMID)
     p = Pic(decoder, 'p16f1826.inc')
 
-    code1(p, decoder)
-    p.run(verbose=True)
-
-    p.dump_data(range(64))
+    code3(p, decoder)
+    
 
