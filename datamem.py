@@ -13,7 +13,7 @@ the gpr memory may be accessed as a continuous vector (excluding common ram) usi
 starting at 0x2000
 
 translate function resolves addresses into a bank, location and linear gpr address.  it also
-accepts addresses as register names which it looks up in a dictionary. 
+accepts addresses as register names which it looks up in a dictionary.
 
 __setitem__ and __getitem__ use the translation function to resolve addresses and then set
 or get a value from the correct region (sfr, gpr)
@@ -22,6 +22,7 @@ or get a value from the correct region (sfr, gpr)
 import array
 
 MAXRAM = 0x1000
+
 
 class DataMem():
     def __init__(self, maxram, reg):
@@ -43,7 +44,7 @@ class DataMem():
     def translate(self, address):
         ''' translate into bank, location, linear using traditional or linear data addressing '''
         
-        # allow location to be a register name or int address 
+        # allow location to be a register name or int address
         address = self.reg[address] if isinstance(address, str) else address
         
         # determine if this is a traditional (0x1000) or linear (0x2000) address
@@ -93,4 +94,7 @@ class DataMem():
                 print('{:04X}: '.format(address), end='')
             print('{:02X} '.format(self[address]), end='')
             if i % 8 == 7:
+                print()
+        else:
+            if i % 8 != 7:
                 print()

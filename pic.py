@@ -58,6 +58,8 @@ class Pic:
         # stack
         self.stack = [0 for i in range(MAXSTACK)]
 
+        self.data.clear()
+        
         self.cycles = 0
         self.pch = 0
 
@@ -262,14 +264,12 @@ class Pic:
     def run(self, verbose=False):
         ''' run until pc == 07FF. i.e. GOTO 0x7FF is HALT '''
         start = time.clock()
-        while True:
+        while self.pc < 0x7FF:
             if verbose:
                 self.status()
             self.exec(verbose)
 
-            # Check for HALT address
-            if (self.pc == 0x7FF):
-                break
+        self.status()
 
         if verbose:
             print('runtime: {:0.2f}ms'.format((time.clock() - start) * 1000))
@@ -403,8 +403,16 @@ class Pic:
         self.z = v == 0
 
     def _asrf(self, ins):
-        pass
-
+        f = ins.f
+        v = self.load(f)
+        self.c = v & 0x01
+        v = (v >> 1) | (v & 0x80)
+        self.z = v == 0
+        if ins.d == 0:
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
+        
     def _bcf(self, ins):
         f = ins.f
         v = self.load(f) & ~(1 << ins.b)
@@ -670,8 +678,8 @@ class Pic:
         pass
 
     def _sublw(self, ins):
-        v = (-self.data['WREG']) & 0xFF + ins.k
-        r = (-self.data['WREG']) & 0x0F + (ins.k & 0x0F)
+        v = ((-self.data['WREG']) & 0xFF) + ins.k
+        r = ((-self.data['WREG']) & 0x0F) + (ins.k & 0x0F)
         self.data['WREG'] = v
         self.c = v & 0x100
         self.dc = r & 0x10
@@ -680,8 +688,8 @@ class Pic:
 
     def _subwf(self, ins):
         f = ins.f
-        v = (-self.data['WREG']) & 0xFF + self.load(f)
-        r = (-self.data['WREG']) & 0x0F + (self.load(f) & 0x0F)
+        v = ((-self.data['WREG']) & 0xFF) + self.load(f)
+        r = ((-self.data['WREG']) & 0x0F) + (self.load(f) & 0x0F)
         if ins.d == 0:
             self.data['WREG'] = v
         else:
@@ -691,7 +699,16 @@ class Pic:
         self.z = not (v & 0xff)
 
     def _subwfb(self, ins):
-        pass
+        f = ins.f
+        v = self.load(f) + ((-self.data['WREG']) & 0xFF) + ~self.c
+        r = (self.load(f) & 0x0F) + ((-self.data['WREG']) & 0x0F) + ~self.c
+        if ins.d == 0:
+            self.data['WREG'] = v
+        else:
+            self.store(f, v)
+        self.c = v & 0x100
+        self.dc = r & 0x10
+        self.z = not (v & 0xff)
 
     def _swapf(self, ins):
         f = ins.f
@@ -849,50 +866,7 @@ def twos_complement(input_value, num_bits):
     return -(input_value & mask) + (input_value & ~mask)
 
 
-def code1(p, d):
-    ''' Simple countdown loop'''
-    
-    # allow defining variable names in a dict to pass to load program.
-    # load_program will substitute the names before calling encode
-    data = {
-        'x': 0x20,
-        'y': 0x21,
-    }
-    code = [
-        d.encode('GOTO', k=0x004),
-        d.encode('NOP'),
-        d.encode('NOP'),
-        d.encode('NOP'),
-        d.encode('MOVLW', k=0x50),
-        d.encode('MOVWF', f=data['x']),
-        d.encode('DECFSZ', d=1, f=data['x']),
-        d.encode('BRA', k=-2 & 0x1ff),
-
-        d.encode('CALL', k=0x00A),
-
-        d.encode('GOTO', k=0x7FF),
-
-        d.encode('MOVLW', k=0x45),
-        d.encode('MOVWF', f=data['y']),
-        d.encode('ANDLW', k=0x00),
-        d.encode('RETURN'),
-    ]
-
-    p.load_program(0, code)
-    p.dump_program(range(len(code)))
-    print()
-    p.run(verbose=True) 
-    p.dump_data(range(0x20, 0x30))
-    
-
 def code2(p, d):
-    # this should use the decoder
-    p.load_from_file('test.hex')
-
-    
-def code3(p, d):
-    d = p.decoder
-    
     code = [
         d.encode('MOVLW', k=0x47),
         d.encode('MOVWF', f=0x20),
@@ -903,32 +877,17 @@ def code3(p, d):
     
     p.load_program(0, code)
     p.dump_program(range(len(code)))
-    print()
-    p.run(verbose=True) 
-    p.dump_data(range(0x20, 0x30))
+    p.run(verbose=False)
+    p.dump_data(range(0x20, 0x28))
 
 
-def code4(p, d):
-    d = p.decoder
-    
-    code = [
-        d.encode('MOVLW', k=0x10),
-        d.encode('SUBLW', k=0x20),
-        d.encode('MOVWF', f=0x20),
-        
-        d.encode('GOTO', k=0x7FF),
-    ]
-    
-    p.load_program(0, code)
-    p.dump_program(range(len(code)))
-    print()
-    p.run(verbose=True) 
-    p.dump_data(range(0x20, 0x30))
-      
+def test(p, d):
+    # this should use the decoder
+    p.load_from_file('test.hex')
+
+
 if __name__ == '__main__':
     decoder = Decoder(insdata.ENHMID)
     p = Pic(decoder, 'p16f1826.inc')
 
-    code3(p, decoder)
-    
-
+    code2(p, decoder)

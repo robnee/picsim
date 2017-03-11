@@ -96,3 +96,91 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
     ADDLW      0x25
     >>> print(d.decode(0b11000101011011))
     ADDFSR     FSR1, 0x1b
+
+# test instruction execution
+    >>> import test
+    >>> p = pic.Pic(d, 'p16f1826.inc')
+    >>> test.test1(p, d)
+    0000   GOTO       0x0004
+    0001   NOP       
+    0002   NOP       
+    0003   NOP       
+    0004   MOVLW      0x50
+    0005   MOVWF      0x20
+    0006   DECFSZ     0x20, F
+    0007   BRA        0x01FE
+    0008   CALL       0x000A
+    0009   GOTO       0x07FF
+    000A   MOVLW      0x45
+    000B   MOVWF      0x21
+    000C   ANDLW      0x00
+    000D   RETURN    
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:1 DC:0 C:0 W:00 CC:252
+    0020: 00 45 
+    >>> test.test2(p, d)
+    0000   MOVLW      0x47
+    0001   MOVWF      0x20
+    0002   SWAPF      0x20, W
+    0003   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:74 CC:5
+    0020: 47 00 
+    >>> test.test3(p, d)
+    0000   MOVLW      0x10
+    0001   IORWF      0x20, F
+    0002   BSF        0x20, 2
+    0003   BRA        0x0001
+    0004   BSF        0x20, 7
+    0005   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:10 CC:7
+    0020: 14 00 
+    >>> test.test4(p, d)
+    0000   MOVLW      0x10
+    0001   SUBLW      0x20
+    0002   MOVWF      0x20
+    0003   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:1 W:10 CC:5
+    0020: 10 00 
+    >>> test.test5(p, d)
+    0000   MOVLW      0x03
+    0001   MOVWF      0x22
+    0002   MOVLW      0x11
+    0003   MOVWF      0x23
+    0004   MOVLW      0x02
+    0005   MOVWF      0x20
+    0006   MOVLW      0x99
+    0007   MOVWF      0x21
+    0008   MOVF       0x21, W
+    0009   SUBWF      0x23, F
+    000A   MOVF       0x20, W
+    000B   BTFSS      0x03, 0
+    000C   ADDLW      0x01
+    000D   SUBWF      0x22, F
+    000E   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:1 DC:1 C:1 W:03 CC:16
+    0020: 02 99 00 78 
+    >>> test.test6(p, d)
+    0000   MOVLW      0x03
+    0001   MOVWF      0x22
+    0002   MOVLW      0x11
+    0003   MOVWF      0x23
+    0004   MOVLW      0x02
+    0005   MOVWF      0x20
+    0006   MOVLW      0x99
+    0007   MOVWF      0x21
+    0008   MOVF       0x21, W
+    0009   SUBWF      0x23, F
+    000A   MOVF       0x20, W
+    000B   SUBWFB     0x22, F
+    000C   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:1 DC:1 C:1 W:02 CC:14
+    0020: 02 99 00 78 
+    >>> test.test7(p, d)
+    0000   MOVLW      0x01
+    0001   MOVWF      0x20
+    0002   MOVLW      0x80
+    0003   MOVWF      0x21
+    0004   ASRF       0x20, F
+    0005   ASRF       0x21, F
+    0006   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:80 CC:8
+    0020: 00 C0 

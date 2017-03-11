@@ -1,7 +1,7 @@
 
 '''
 This is the instruction data grabbed from the Instruction Set Summary table
-in the Pic data sheet for an enhanced midrange (14bit) processor such as the 
+in the Pic data sheet for an enhanced midrange (14bit) processor such as the
 16f1826 or 12f1822.  This is used to initialize the decoder.
 
 fields:
