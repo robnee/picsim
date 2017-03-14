@@ -175,6 +175,9 @@ def test7(p, d):
     
     run(p, code, data)
     
+def test8(p, d):
+    ''' test FSR instructions and indirect registers '''
+    pass
     
 def test(p, d):
     # this should use the decoder

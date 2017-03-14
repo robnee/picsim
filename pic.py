@@ -110,7 +110,7 @@ class Pic:
 
     def load(self, f):
         ''' load data from banked memory '''
-        address = self.data['BSR'] + f
+        address = self.bsr + f
         return self.data[address]
     
     def load_indirect(self, address):
@@ -126,7 +126,7 @@ class Pic:
 
     def store(self, f, value):
         ''' banked store '''
-        address = self.data['BSR'] + f
+        address = self.bsr + f
         self.data[address] = value
 
     def store_indirect(self, address, value):
@@ -136,7 +136,7 @@ class Pic:
     def set_data(self, address, value):
         ''' handles writing to special locations '''
         if address < datamem.MAXRAM and address & 0x7F == self.reg['PCL']:
-            self.set_pc((self.data['PCLATH'] << 8) | value)
+            self.set_pc((self.pclath << 8) | value)
         else:
             self.data[address] = value
             
@@ -147,11 +147,11 @@ class Pic:
 
     def status(self):
         ''' print the current state of the processor registers '''
-        print('PC:{:02X}{:02X} SP:{:02X} BS:{:02X}'.format(self.pch, self.data['PCL'], self.data['STKPTR'], self.data['BSR']), end='')
+        print('PC:{:04X} SP:{:02X} BS:{:02X}'.format(self.pc, self.stkptr, self.bsr), end='')
         
         print(' TO:{} PD:{} Z:{} DC:{} C:{}'.format(self.get_bit('STATUS', 'NOT_TO'), self.get_bit('STATUS', 'NOT_PD'), self.z, self.dc, self.c), end='')
         
-        print(' W:{:02X} CC:{:d}'.format(self.data['WREG'], self.cycles))
+        print(' W:{:02X} CC:{:d}'.format(self.wreg, self.cycles))
         
     def dump_data(self, addresses):
         self.data.dump(addresses)
@@ -159,17 +159,73 @@ class Pic:
     @property
     def pc(self):
         ''' get the value of the program counter '''
-        return (self.pch << 8) | self.data['PCL']
+        return (self.pch << 8) | self.pcl
     
     @pc.setter
     def pc(self, address):
-        self.pch, self.data['PCL'] = divmod(address, 0X100)
+        self.pch, self.pcl = divmod(address, 0X100)
+
+    @property
+    def pcl(self):
+        return self.data['PCL']
+        
+    @pcl.setter
+    def pcl(self, value):
+        self.data['PCL'] = value
+
+    @property
+    def pclath(self):
+        return self.data['PCLATH']
+        
+    @pclath.setter
+    def pclath(self, value):
+        self.data['PCLATH'] = value
+
+    @property
+    def wreg(self):
+        return self.data['WREG']
+        
+    @wreg.setter
+    def wreg(self, value):
+        self.data['WREG'] = value
+
+    @property
+    def bsr(self):
+        return self.data['BSR']
+        
+    @bsr.setter
+    def bsr(self, value):
+        self.data['BSR'] = value
+
+    @property
+    def fsr0(self):
+        return (self.data['FSR0H'] << 8) | self.data['FSR0L']
+        
+    @fsr0.setter
+    def fsr0(self, value):
+        self.data['FSR0H'], self.data['FSR0L'] = divmod(value % 0x10000, 0x100)
+
+    @property
+    def fsr1(self):
+        return (self.data['FSR1H'] << 8) | self.data['FSR1L']
+        
+    @fsr1.setter
+    def fsr1(self, value):
+        self.data['FSR1H'], self.data['FSR1L'] = divmod(value % 0x10000, 0x100)
+
+    @property
+    def stkptr(self):
+        return self.data['STKPTR']
+    
+    @stkptr.setter
+    def stkptr(self, value):
+        self.data['STKPTR'] = value
 
     @property
     def z(self):
-        ''' get STATUS register Z bit as 0 or 1 '''
-        return 1 if self.data['STATUS'] & (1 << self.reg['Z']) else 0
-    
+        ''' get STATUS register zero bit as 0 or 1 '''
+        return self.get_bit('STATUS', 'Z')
+
     @z.setter
     def z(self, value):
         if value:
@@ -179,7 +235,7 @@ class Pic:
 
     @property
     def c(self):
-        ''' get STATUS register Z bit as 0 or 1 '''
+        ''' get STATUS register carry bit as 0 or 1 '''
         return self.get_bit('STATUS', 'C')
 
     @c.setter
@@ -191,28 +247,31 @@ class Pic:
 
     @property
     def dc(self):
-        ''' get STATUS register Z bit as 0 or 1 '''
+        ''' get STATUS register digit carry bit as 0 or 1 '''
         return self.get_bit('STATUS', 'DC')
     
     @dc.setter
     def dc(self, value):
         if value:
-            self.set_bit('STATUS', self.reg['DC'])
+            self.set_bit('STATUS', 'DC')
         else:
-            self.clear_bit('STATUS', self.reg['DC'])
+            self.clear_bit('STATUS', 'DC')
             
     def get_bit(self, register, bit_number):
         ''' get a bit in register specified by number or name '''
         if isinstance(bit_number, str):
             bit_number = self.reg[bit_number]
-        return 1 if self.data['STATUS'] & (1 << bit_number) else 0
+        return 1 if self.data[register] & (1 << bit_number) else 0
         
-    def set_bit(self, register, bit_number):
+    def set_bit(self, register, bit_number, state=1):
         ''' set a bit in a register specified by number or name '''
         if isinstance(bit_number, str):
             bit_number = self.reg[bit_number]
-        self.data[register] |= (1 << bit_number)
-
+        if state:
+            self.data[register] |= (1 << bit_number)
+        else:
+            self.data[register] &= ~(1 << bit_number)
+            
     def clear_bit(self, register, bit_number):
         ''' clear a bit in a register specified by number or name '''
         if isinstance(bit_number, str):
@@ -222,7 +281,7 @@ class Pic:
     def push(self):
         ''' push pc onto stack '''
         # get sp
-        sp = self.data['STKPTR']
+        sp = self.stkptr
 
         # Set overflow bit
         if sp == 0x0F:
@@ -233,12 +292,12 @@ class Pic:
 
         # save return address and update STKPTR
         self.stack[sp] = self.pc
-        self.data['STKPTR'] = sp
+        self.stkptr = sp
 
     def pop(self):
         ''' pop value on stack into pc '''
         # get sp
-        sp = self.data['STKPTR']
+        sp = self.stkptr
 
         # set underflow bit
         if sp == 0:
@@ -248,18 +307,20 @@ class Pic:
         self.pc = self.stack[sp]
 
         # STVREN is not implemented so stack wraps and no reset occurs
-        self.data['STKPTR'] = (sp - 1) & 0x0F
+        self.stkptr = (sp - 1) & 0x0F
 
     def reset(self, cond=None):
         self.data.clear()
         if cond is None or cond == self.reg['NOT_POR']:
-            self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
+            self.data['PCON'] = 0
+            self.set_bit('PCON', 'NOT_POR')
+            self.set_bit('PCON', 'NOT_BOR')
             self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
         elif cond == self.reg['NOT_RI']:
             self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
             self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
 
-        self.data['STKPTR'] = 0x1F
+        self.stkptr = 0x1F
 
     def run(self, verbose=False):
         ''' run until pc == 07FF. i.e. GOTO 0x7FF is HALT '''
@@ -350,26 +411,24 @@ class Pic:
     def _addfsr(self, ins):
         k = twos_complement(ins.k, 6)
         if ins.n == 0:
-            v = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
-            self.data['FSR0H'], self.data['FSR0L'] = divmod(v % 0xFFFF, 0xFF)
+            self.fsr0 += k
         else:
-            v = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
-            self.data['FSR1H'], self.data['FSR1L'] = divmod(v % 0xFFFF, 0xFF)
+            self.fsr1 += k
 
     def _addlw(self, ins):
-        v = self.data['WREG'] + ins.k
-        r = (self.data['WREG'] & 0x0f) + (ins.k & 0xf)
-        self.data['WREG'] = v
+        v = self.wreg + ins.k
+        r = (self.wreg & 0x0f) + (ins.k & 0xf)
+        self.wreg = v
         self.c = v & 0x100
         self.dc = r & 0x10
         self.z = not (v & 0xff)
 
     def _addwf(self, ins):
         f = ins.f
-        v = self.load(f) + self.data['WREG']
-        r = (self.load(f) & 0x0f) + (self.data['WREG'] & 0x0f)
+        v = self.load(f) + self.wreg
+        r = (self.load(f) & 0x0f) + (self.wreg & 0x0f)
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.c = v & 0x100
@@ -378,10 +437,10 @@ class Pic:
 
     def _addwfc(self, ins):
         f = ins.f
-        v = self.load(f) + self.data['WREG'] + self.c
-        r = (self.load(f) & 0x0f) + (self.data['WREG'] & 0x0f) + self.c
+        v = self.load(f) + self.wreg + self.c
+        r = (self.load(f) & 0x0f) + (self.wreg & 0x0f) + self.c
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.c = v & 0x100
@@ -389,15 +448,15 @@ class Pic:
         self.z = not (v & 0xff)
 
     def _andlw(self, ins):
-        v = self.data['WREG'] & ins.k
-        self.data['WREG'] = v
+        v = self.wreg & ins.k
+        self.wreg = v
         self.z = v == 0
 
     def _andwf(self, ins):
         f = ins.f
-        v = self.load(f) & self.data['WREG']
+        v = self.load(f) & self.wreg
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
@@ -409,7 +468,7 @@ class Pic:
         v = (v >> 1) | (v & 0x80)
         self.z = v == 0
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         
@@ -423,7 +482,7 @@ class Pic:
         self.cycles += 1
 
     def _brw(self, ins):
-        self.pc += self.data['WREG']
+        self.pc += self.wreg
         self.cycles += 1
 
     def _bsf(self, ins):
@@ -443,12 +502,12 @@ class Pic:
 
     def _call(self, ins):
         self.push()
-        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | ins.k
+        self.pc = (self.pclath & 0b01111000 << 8) | ins.k
         self.cycles += 1
 
     def _callw(self, ins):
         self.push()
-        self.pc = (self.data['PCLATH'] & 0b01111111 << 8) | self.data['WREG']
+        self.pc = (self.pclath & 0b01111111 << 8) | self.wreg
         self.cycles += 1
 
     def _clrf(self, ins):
@@ -456,7 +515,7 @@ class Pic:
         self.z = 1
 
     def _clrw(self, ins):
-        self.data['WREG'] = 0
+        self.wreg = 0
         self.z = 1
 
     def _clrwdt(self, ins):
@@ -466,7 +525,7 @@ class Pic:
         f = ins.f
         v = (self.load(f) - 1) & 0xFF
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
@@ -475,7 +534,7 @@ class Pic:
         f = ins.f
         v = (~self.load(f)) & 0xFF
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
@@ -484,7 +543,7 @@ class Pic:
         f = ins.f
         v = (self.load(f) - 1) & 0xFF
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         if not v:
@@ -492,14 +551,14 @@ class Pic:
             self.cycles += 1
 
     def _goto(self, ins):
-        self.pc = (self.data['PCLATH'] & 0b01111000 << 8) | ins.k
+        self.pc = (self.pclath & 0b01111000 << 8) | ins.k
         self.cycles += 1
 
     def _incf(self, ins):
         f = ins.f
         v = (self.load(f) + 1) & 0xFF
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
@@ -508,7 +567,7 @@ class Pic:
         f = ins.f
         v = (self.load(f) + 1) & 0xFF
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         if not v:
@@ -516,15 +575,15 @@ class Pic:
             self.cycles += 1
 
     def _iorlw(self, ins):
-        v = self.data['WREG'] | ins.k
-        self.data['WREG'] = v
+        v = self.wreg | ins.k
+        self.wreg = v
         self.z = v == 0
 
     def _iorwf(self, ins):
         f = ins.f
-        v = self.load(f) | self.data['WREG']
+        v = self.load(f) | self.wreg
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
@@ -533,7 +592,7 @@ class Pic:
         f = ins.f
         v = self.load(f)
         if ins.d == 0:
-            self.data['WREG'] = v << 1
+            self.wreg = v << 1
         else:
             self.store(f, v << 1)
         self.c = v & 0x80
@@ -543,7 +602,7 @@ class Pic:
         f = ins.f
         v = self.load(f)
         if ins.d == 0:
-            self.data['WREG'] = v >> 1
+            self.wreg = v >> 1
         else:
             self.store(f, v >> 1)
         self.c = v & 0x01
@@ -553,91 +612,79 @@ class Pic:
         f = ins.f
         v = self.load(f)
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
 
     def _moviwk(self, ins):
         k = twos_complement(ins.k, 6)
-        if ins.n == 0:
-            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
-        else:
-            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
+        a = (self.fsr0 if ins.n == 0 else self.fsr1) + k
         v = self.load_indirect(a)
-        self.data['WREG'] = v
+        self.wreg = v
         self.z = v == 0
         pass
 
     def _moviwm(self, ins):
         m = ins.m
-        if ins.n == 0:
-            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L'])
-        else:
-            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L'])
+        a = self.fsr0 if ins.n == 0 else self.fsr1
         if m == 0:
             a += 1
         elif m == 1:
             a -= 1
         v = self.load_indirect(a)
-        self.data['WREG'] = v
+        self.wreg = v
         self.z = v == 0
         if m == 2:
             a += 1
         elif m == 3:
             a -= 1
         if ins.n == 0:
-            self.data['FSR0H'], self.data['FSR0L'] = divmod(a % 0xFFFF, 0xFF)
+            self.fsr0 = a
         else:
-            self.data['FSR1H'], self.data['FSR1L'] = divmod(a % 0xFFFF, 0xFF)
+            self.fsr1 = a
 
     def _movlb(self, ins):
-        self.data['BSR'] = ins.k
+        self.bsr = ins.k
 
     def _movlp(self, ins):
-        self.data['PCLATH'] = ins.k
+        self.pclath = ins.k
 
     def _movlw(self, ins):
-        self.data['WREG'] = ins.k
+        self.wreg = ins.k
 
     def _movwf(self, ins):
         f = ins.f
-        v = self.data['WREG']
+        v = self.wreg
         self.store(f, v)
 
     def _movwik(self, ins):
         k = twos_complement(ins.k, 6)
-        if ins.n == 0:
-            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L']) + k
-        else:
-            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L']) + k
-        self.store_indirect(a, self.data['WREG'])
+        a = (self.fsr0 if ins.n == 0 else self.fsr1) + k
+        self.store_indirect(a, self.wreg)
 
     def _movwim(self, ins):
         m = ins.m
-        if ins.n == 0:
-            a = ((self.data['FSR0H'] << 8) | self.data['FSR0L'])
-        else:
-            a = ((self.data['FSR1H'] << 8) | self.data['FSR1L'])
+        a = self.fsr0 if ins.n == 0 else self.fsr1
         if m == 0:
             a += 1
         elif m == 1:
             a -= 1
-        self.store_indirect(a, self.data['WREG'])
+        self.store_indirect(a, self.wreg)
         if m == 2:
             a += 1
         elif m == 3:
             a -= 1
         if ins.n == 0:
-            self.data['FSR0H'], self.data['FSR0L'] = divmod(a % 0xFFFF, 0xFF)
+            self.fsr0 = a
         else:
-            self.data['FSR1H'], self.data['FSR1L'] = divmod(a % 0xFFFF, 0xFF)
+            self.fsr1 = a
 
     def _nop(self, ins):
         pass
 
     def _option(self, ins):
-        self.data['OPTION'] = self.data['WREG']
+        self.data['OPTION'] = self.wreg
 
     def _reset(self, ins):
         self.reset(self.reg['NOT_RI'])
@@ -648,7 +695,7 @@ class Pic:
         self.cycles += 1
 
     def _retlw(self, ins):
-        self.data['WREG'] = ins.k
+        self.wreg = ins.k
         self.pop()
         self.cycles += 1
 
@@ -660,7 +707,7 @@ class Pic:
         f = ins.f
         v = self.load(f)
         if ins.d == 0:
-            self.data['WREG'] = (v << 1) | self.c
+            self.wreg = (v << 1) | self.c
         else:
             self.store(f, (v << 1) | self.c)
         self.c = v & 0x80
@@ -669,7 +716,7 @@ class Pic:
         f = ins.f
         v = self.load(f)
         if ins.d == 0:
-            self.data['WREG'] = (self.c << 7) | (v >> 1)
+            self.wreg = (self.c << 7) | (v >> 1)
         else:
             self.store(f, (self.c << 7) | (v >> 1))
         self.c = v & 0x01
@@ -678,9 +725,9 @@ class Pic:
         pass
 
     def _sublw(self, ins):
-        v = ((-self.data['WREG']) & 0xFF) + ins.k
-        r = ((-self.data['WREG']) & 0x0F) + (ins.k & 0x0F)
-        self.data['WREG'] = v
+        v = ((-self.wreg) & 0xFF) + ins.k
+        r = ((-self.wreg) & 0x0F) + (ins.k & 0x0F)
+        self.wreg = v
         self.c = v & 0x100
         self.dc = r & 0x10
         self.z = not (v & 0xff)
@@ -688,10 +735,10 @@ class Pic:
 
     def _subwf(self, ins):
         f = ins.f
-        v = ((-self.data['WREG']) & 0xFF) + self.load(f)
-        r = ((-self.data['WREG']) & 0x0F) + (self.load(f) & 0x0F)
+        v = ((-self.wreg) & 0xFF) + self.load(f)
+        r = ((-self.wreg) & 0x0F) + (self.load(f) & 0x0F)
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.c = v & 0x100
@@ -700,10 +747,10 @@ class Pic:
 
     def _subwfb(self, ins):
         f = ins.f
-        v = self.load(f) + ((-self.data['WREG']) & 0xFF) + ~self.c
-        r = (self.load(f) & 0x0F) + ((-self.data['WREG']) & 0x0F) + ~self.c
+        v = self.load(f) + ((-self.wreg) & 0xFF) + ~self.c
+        r = (self.load(f) & 0x0F) + ((-self.wreg) & 0x0F) + ~self.c
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.c = v & 0x100
@@ -714,26 +761,26 @@ class Pic:
         f = ins.f
         v = self.load(f)
         if ins.d == 0:
-            self.data['WREG'] = (v << 4) & 0xFF | (v >> 4)
+            self.wreg = (v << 4) & 0xFF | (v >> 4)
         else:
             self.store((v << 4) & 0xFF | (v >> 4))
 
     def _tris(self, ins):
         if ins.f == 0b101:
-            self.data['TRISA'] = self.data['WREG']
+            self.data['TRISA'] = self.wreg
         elif ins.f == 0b110:
-            self.data['TRISB'] = self.data['WREG']
+            self.data['TRISB'] = self.wreg
 
     def _xorlw(self, ins):
-        v = self.data['WREG'] ^ ins.k
-        self.data['WREG'] = v
+        v = self.wreg ^ ins.k
+        self.wreg = v
         self.z = v == 0
 
     def _xorwf(self, ins):
         f = ins.f
-        v = self.load(f) ^ self.data['WREG']
+        v = self.load(f) ^ self.wreg
         if ins.d == 0:
-            self.data['WREG'] = v
+            self.wreg = v
         else:
             self.store(f, v)
         self.z = v == 0
@@ -778,8 +825,8 @@ class Instruction:
         bits = self.info.opcode
         
         # build instruction from fields starting after opcode
-        for i, field_name in enumerate(InstructionInfo.field_list[1:]):
-            x, y = self.info.field_spans[i + 1]
+        for i, field_name in enumerate(InstructionInfo.field_list[1:], 1):
+            x, y = self.info.field_spans[i]
             value = getattr(self, field_name)
             if value is not None:
                 bits += '{:0{}b}'.format(value, y - x)
@@ -811,13 +858,13 @@ class Decoder:
         
     def __init__(self, data):
         ''' parse instruction table and build lookup tables '''
-        self.ins_list = []
+        self.info_list = []
         self.mnemonic_dict = {}
 
         for rec in data:
-            ins = InstructionInfo(rec)
-            self.ins_list.append(ins)
-            self.mnemonic_dict[ins.mnemonic] = ins
+            info = InstructionInfo(rec)
+            self.info_list.append(info)
+            self.mnemonic_dict[info.mnemonic] = info
 
     def decode(self, word):
         ''' return an Instruction consisting of info and tuple (opcode, b, d, f, n, m, k) '''
@@ -828,7 +875,7 @@ class Decoder:
         # the instruction word starts with the instruction opcode.  Use a generator
         # comprehension to find match.  It returns a list so use a comma on the lhs
         # to force an unpack.  An exception is thrown if no or multiple matches
-        info, = [item for item in self.ins_list if bits.startswith(item.opcode)]
+        info, = [item for item in self.info_list if bits.startswith(item.opcode)]
 
         # build list of fields
         l = []
@@ -886,8 +933,81 @@ def test(p, d):
     p.load_from_file('test.hex')
 
 
+def assemble(decoder, source, reg):
+    '''
+    # assembler
+    sym    instruction    arg, arg
+    
+    sym can come from register dictionary or program dictionary
+    
+    macro instructions
+    org
+    equ
+    
+    assume decimal radix
+    
+    '''
+
+    symtab = {}
+    pc = 0
+    
+    for line in source.splitlines():
+        m = re.search("(?i)(^\S+)?\s+(\S+)?\s+(.+)?", line)
+        if m:
+            # unpak parsed groups
+            sym, op, args = m.groups()
+            
+            op = op.upper() if op else ''
+            sym = sym.upper() if sym else ''
+            
+            # convert args into a list of values looking up symbols if needed
+            values = []
+            if args:
+                for arg in args.upper().split(','):
+                    if arg.startswith('0X'):
+                        values.append(int(arg, 16))
+                    elif arg.isdecimal():
+                        values.append(int(arg))
+                    elif arg in reg:
+                        values.append(reg[arg])
+                    elif arg in symtab:
+                        values.append(symtab[arg])
+                    else:
+                        values.append(0)
+            
+            if op == 'ORG':
+                pc = values[0]
+                if sym:
+                    symtab[sym] = pc
+            elif op == 'EQU':
+                symtab[sym] = values[0]
+            else:
+                # assign symbols to current pc
+                if sym:
+                    symtab[sym] = pc
+                if op:
+                    # get info about the instruction
+                    info = decoder.mnemonic_dict[op]
+                    
+                    print(info.arg, values)
+
+            if op:
+                print('{:04X}  {:8} {:8} 0x{:X}'.format(pc, sym, op, values[0]))
+                pc += 1
+        
+
 if __name__ == '__main__':
     decoder = Decoder(insdata.ENHMID)
     p = Pic(decoder, 'p16f1826.inc')
 
-    code2(p, decoder)
+    #code2(p, decoder)
+    
+    source = '''
+x       equ 0x20
+loop    org 0x0004
+        movlw 0x23
+        movwf x
+        goto loop
+    '''
+    print(source)
+    assemble(decoder, source, p.reg)
