@@ -792,7 +792,7 @@ class InstructionInfo:
     field_list = ['opcode', 'b', 'd', 'f', 'n', 'm', 'k']
 
     def __init__(self, rec):
-        self.mnemonic, self.arg, self.desc, self.cycles, self.opcode_mask, self.flags, self.notes = rec
+        self.mnemonic, arg, self.desc, self.cycles, self.opcode_mask, self.flags, self.notes = rec
 
         # get opcode mask and remove any whitespace
         # break opcode mask into bit spans for each field for decoding later
@@ -801,7 +801,10 @@ class InstructionInfo:
         # build a tuple of fields and their spans
         self.opcode = m.group(1)
         self.field_spans = tuple(m.span(i + 1) for i in range(len(self.field_list)))
-    
+
+        # make a tuple for convenience
+        self.arg = tuple(arg.split(','))
+        
     def __str__(self):
         s = self.opcode
         for field, span in zip(self.field_list, self.field_spans):
@@ -812,16 +815,21 @@ class InstructionInfo:
 
 
 class Instruction:
+    ''' instruction instance '''
     def __init__(self, info, fields):
         self.info = info
         self.fields = fields
-        assert len(fields) == 7
     
     def __getattr__(self, name):
-        i = InstructionInfo.field_list.index(name)
-        return self.fields[i]
+        if name == 'opcode':
+            return self.info.opcode
+        elif name in self.fields:
+            return self.fields[name]
+        else:
+            return None
     
     def to_bits(self):
+        ''' convert instruction into 14 bit string '''
         bits = self.info.opcode
         
         # build instruction from fields starting after opcode
@@ -834,21 +842,19 @@ class Instruction:
         return bits
     
     def __str__(self):
-        opcode, b, d, f, n, m, k = self.fields
-
-        if f is not None and d is not None:
-            sd = 'W' if d == 0 else 'F'
-            return '{:10} 0x{:02x}, {}'.format(self.info.mnemonic, f, sd)
-        elif f is not None and b is not None:
-            return '{:10} 0x{:02x}, {}'.format(self.info.mnemonic, f, b)
-        elif f is not None:
-            return '{:10} 0x{:02x}'.format(self.info.mnemonic, f)
-        elif n is not None and k is not None:
-            return '{:10} FSR{}, 0x{:02x}'.format(self.info.mnemonic, n, k)
-        elif k is not None:
+        if self.f is not None and self.d is not None:
+            sd = 'W' if self.d == 0 else 'F'
+            return '{:10} 0x{:02x}, {}'.format(self.info.mnemonic, self.f, sd)
+        elif self.f is not None and self.b is not None:
+            return '{:10} 0x{:02x}, {}'.format(self.info.mnemonic, self.f, self.b)
+        elif self.f is not None:
+            return '{:10} 0x{:02x}'.format(self.info.mnemonic, self.f)
+        elif self.n is not None and self.k is not None:
+            return '{:10} FSR{}, 0x{:02x}'.format(self.info.mnemonic, self.n, self.k)
+        elif self.k is not None:
             x, y = self.info.field_spans[6]
             width = 4 if y - x > 8 else 2
-            return '{:10} 0x{:0{}X}'.format(self.info.mnemonic, k, width)
+            return '{:10} 0x{:0{}X}'.format(self.info.mnemonic, self.k, width)
         else:
             return '{:10}'.format(self.info.mnemonic)
 
@@ -867,7 +873,7 @@ class Decoder:
             self.mnemonic_dict[info.mnemonic] = info
 
     def decode(self, word):
-        ''' return an Instruction consisting of info and tuple (opcode, b, d, f, n, m, k) '''
+        ''' return an Instruction consisting of info and dict of fields (b, d, f, n, m, k) '''
 
         # convert program word to a bit string
         bits = '{:014b}'.format(word)
@@ -878,33 +884,30 @@ class Decoder:
         info, = [item for item in self.info_list if bits.startswith(item.opcode)]
 
         # build list of fields
-        l = []
-        for x, y in info.field_spans:
+        fields = {}
+        for name, span in zip(info.field_list, info.field_spans):
+            x, y = span
             if x != y:
-                l.append(int(bits[x:y], 2))
-            else:
-                l.append(None)
+                fields[name] = int(bits[x:y], 2)
       
-        return Instruction(info, tuple(l))
+        return Instruction(info, fields)
 
     def encode(self, mnemonic, **kwargs):
         info = self.mnemonic_dict[mnemonic.upper()]
 
-        fields = []
+        fields = {}
         
         # build instruction from fields starting after opcode
         for i, field_name in enumerate(InstructionInfo.field_list):
             x, y = info.field_spans[i]
             if field_name == 'opcode':
-                fields.append(info.opcode)
+                pass
             elif field_name in kwargs:
-                fields.append(kwargs[field_name])
-            elif field_name != 'opcode' and x != y:
+                fields[field_name] = kwargs[field_name]
+            elif x != y:
                 raise IndexError('{} {}:{} missing'.format(field_name, x, y))
-            else:
-                fields.append(None)
         
-        return Instruction(info, tuple(fields))
+        return Instruction(info, fields)
 
 
 def twos_complement(input_value, num_bits):
@@ -945,9 +948,9 @@ def assemble(decoder, source, reg):
     equ
     
     assume decimal radix
-    
     '''
 
+    code = []
     symtab = {}
     pc = 0
     
@@ -988,26 +991,44 @@ def assemble(decoder, source, reg):
                 if op:
                     # get info about the instruction
                     info = decoder.mnemonic_dict[op]
-                    
-                    print(info.arg, values)
 
-            if op:
-                print('{:04X}  {:8} {:8} 0x{:X}'.format(pc, sym, op, values[0]))
-                pc += 1
-        
+                    # handle special case of BRA instruction relative address
+                    if op == 'BRA':
+                        values[0] = values[0] - (pc + 1)
+                        
+                    ins = Instruction(info, dict(zip(info.arg, values)))
+
+                    # add instruction to code list
+                    if len(code) > pc:
+                        code[pc] = ins
+                    else:
+                        code.extend([None] * (pc - len(code)))
+                        code.append(ins)
+                    
+                    pc += 1
+
+    return code, symtab
+
 
 if __name__ == '__main__':
     decoder = Decoder(insdata.ENHMID)
     p = Pic(decoder, 'p16f1826.inc')
-
+ 
     #code2(p, decoder)
     
     source = '''
 x       equ 0x20
+reset   org 0x0000
 loop    org 0x0004
         movlw 0x23
         movwf x
+        addwf x,w
         goto loop
+test    org 0x0010
+        movlw 0x33
+        bra reset
     '''
-    print(source)
-    assemble(decoder, source, p.reg)
+    
+    code, _ = assemble(decoder, source, p.reg)
+    p.load_program(0, code)
+    p.dump_program(range(len(code)))
