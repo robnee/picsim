@@ -67,7 +67,7 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
     
 # Tests encoding instructions
     >>> import pic, insdata
-    >>> d = pic.Decoder(insdata.ENHMID)
+    >>> d = pic.Decoder(insdata.ENHMID, 'p16f1826.inc')
     >>> d.encode('GOTO', k=0x004).to_bits()
     '10100000000100'
     >>> d.encode('NOP').to_bits()
@@ -99,7 +99,7 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
 
 # test instruction execution
     >>> import test
-    >>> p = pic.Pic(d, 'p16f1826.inc')
+    >>> p = pic.Pic(d)
     >>> test.test1(p, d)
     0000   GOTO       0x0004
     0001   NOP       
@@ -184,3 +184,29 @@ Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
     0006   GOTO       0x07FF
     PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:80 CC:8
     0020: 00 C0 
+    >>> test.test8(p, d)
+    0000   MOVLW      0x01
+    0001   MOVWF      0x20
+    0002   MOVLW      0x80
+    0003   MOVWF      0x21
+    0004   ASRF       0x20, F
+    0005   ASRF       0x21, F
+    0006   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:80 CC:8
+    0020: 00 C0 
+    >>> test.test9(p, d)
+    0000   MOVLW      0x0A
+    0001   MOVWF      0x20
+    0002   MOVLW      0x05
+    0003   MOVWF      0x21
+    0004   DECFSZ     0x21, F
+    0005   GOTO       0x0004
+    0006   DECFSZ     0x20, F
+    0007   BRA        0x01FA
+    0008   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:05 CC:193
+    0000: 00 00 FF 00 00 00 00 00 
+    0008: 00 05 00 00 00 00 00 00 
+    0010: 00 00 00 00 00 00 00 00 
+    0018: 00 00 00 00 00 00 00 00 
+    0020: 00 00 

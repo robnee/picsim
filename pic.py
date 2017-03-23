@@ -21,14 +21,11 @@ MAXSTACK = 0x0010
 
 
 class Pic:
-    def __init__(self, decoder, incfile):
+    def __init__(self, core):
         ''' init class with table of instruction set data '''
         
-        # load include file with reg definitions
-        self.load_inc_file(incfile)
-
         self.stack = array.array('H')
-        self.data = datamem.DataMem(256, self.reg)
+        self.data = datamem.DataMem(256, core.reg)
         self.clear()
 
         # cycle counter
@@ -37,19 +34,7 @@ class Pic:
         # program counter high byte
         self.pch = 0
 
-        self.decoder = decoder
-
-    def load_inc_file(self, filename):
-        ''' load the register and config word definitions from .inc file and build a dict '''
-        
-        with open(filename) as fp:
-            self.reg = {}
-            for line in fp:
-                # STATUS EQU  H'0003'
-                m = re.search("(?i)^(\S+)\s+EQU\s+H'(\S+)'", line.strip())
-                if m:
-                    name, value = m.groups()
-                    self.reg[name] = int(value, 16)
+        self.core = core
 
     def clear(self):
         ''' clear memory '''
@@ -135,7 +120,7 @@ class Pic:
         
     def set_data(self, address, value):
         ''' handles writing to special locations '''
-        if address < datamem.MAXRAM and address & 0x7F == self.reg['PCL']:
+        if address < datamem.MAXRAM and address & 0x7F == self.core.reg['PCL']:
             self.set_pc((self.pclath << 8) | value)
         else:
             self.data[address] = value
@@ -145,6 +130,9 @@ class Pic:
         for address in address_list:
             print('{:04X}  '.format(address), self.prog[address])
 
+    def dump_data(self, addresses):
+        self.data.dump(addresses)
+
     def status(self):
         ''' print the current state of the processor registers '''
         print('PC:{:04X} SP:{:02X} BS:{:02X}'.format(self.pc, self.stkptr, self.bsr), end='')
@@ -153,9 +141,6 @@ class Pic:
         
         print(' W:{:02X} CC:{:d}'.format(self.wreg, self.cycles))
         
-    def dump_data(self, addresses):
-        self.data.dump(addresses)
-
     @property
     def pc(self):
         ''' get the value of the program counter '''
@@ -260,13 +245,13 @@ class Pic:
     def get_bit(self, register, bit_number):
         ''' get a bit in register specified by number or name '''
         if isinstance(bit_number, str):
-            bit_number = self.reg[bit_number]
+            bit_number = self.core.reg[bit_number]
         return 1 if self.data[register] & (1 << bit_number) else 0
         
     def set_bit(self, register, bit_number, state=1):
         ''' set a bit in a register specified by number or name '''
         if isinstance(bit_number, str):
-            bit_number = self.reg[bit_number]
+            bit_number = self.core.reg[bit_number]
         if state:
             self.data[register] |= (1 << bit_number)
         else:
@@ -275,7 +260,7 @@ class Pic:
     def clear_bit(self, register, bit_number):
         ''' clear a bit in a register specified by number or name '''
         if isinstance(bit_number, str):
-            bit_number = self.reg[bit_number]
+            bit_number = self.core.reg[bit_number]
         self.data[register] &= ~(1 << bit_number)
 
     def push(self):
@@ -309,16 +294,16 @@ class Pic:
         # STVREN is not implemented so stack wraps and no reset occurs
         self.stkptr = (sp - 1) & 0x0F
 
-    def reset(self, cond=None):
+    def preset(self):
         self.data.clear()
-        if cond is None or cond == self.reg['NOT_POR']:
-            self.data['PCON'] = 0
-            self.set_bit('PCON', 'NOT_POR')
-            self.set_bit('PCON', 'NOT_BOR')
-            self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
-        elif cond == self.reg['NOT_RI']:
-            self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
-            self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
+#        if cond is None or cond == self.reg['NOT_POR']:
+#            self.data['PCON'] = 0
+#            self.set_bit('PCON', 'NOT_POR')
+#            self.set_bit('PCON', 'NOT_BOR')
+#            self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
+#        elif cond == self.reg['NOT_RI']:
+#            self.data['PCON'] = (1 << self.reg['NOT_POR']) | (1 << self.reg['NOT_BOR'])
+#            self.data['STATUS'] = (1 << self.reg['NOT_PD']) | (1 << self.reg['NOT_TO'])
 
         self.stkptr = 0x1F
 
@@ -352,60 +337,60 @@ class Pic:
     def dispatch(self, ins):
         ''' dispatch opcode to handler '''
         return {
-            '1100010': self._addfsr,
-            '111110': self._addlw,
-            '000111': self._addwf,
-            '111101': self._addwfc,
-            '111001': self._andlw,
-            '000101': self._andwf,
-            '110111': self._asrf,
-            '0100': self._bcf,
-            '11001': self._bra,
-            '00000000001011': self._brw,
-            '0101': self._bsf,
-            '0110': self._btfsc,
-            '0111': self._btfss,
-            '100': self._call,
-            '00000000001010': self._callw,
-            '0000011': self._clrf,
-            '000001000000': self._clrw,
-            '00000001100100': self._clrwdt,
-            '001001': self._comf,
-            '000011': self._decf,
-            '001011': self._decfsz,
-            '101': self._goto,
-            '001010': self._incf,
-            '001111': self._incfsz,
-            '111000': self._iorlw,
-            '000100': self._iorwf,
-            '110101': self._lslf,
-            '110110': self._lsrf,
-            '001000': self._movf,
-            '1111110': self._moviwk,
-            '00000000010': self._moviwm,
-            '000000001': self._movlb,
-            '1100011': self._movlp,
-            '110000': self._movlw,
-            '0000001': self._movwf,
-            '1111111': self._movwik,
-            '00000000011': self._movwim,
-            '00000000000000': self._nop,
-            '00000001100010': self._option,
-            '00000000000001': self._reset,
-            '00000000001001': self._retfie,
-            '110100': self._retlw,
-            '00000000001000': self._return,
-            '001101': self._rlf,
-            '001100': self._rrf,
-            '00000001100011': self._sleep,
-            '111100': self._sublw,
-            '000010': self._subwf,
-            '111011': self._subwfb,
-            '001110': self._swapf,
-            '00000001100': self._tris,
-            '111010': self._xorlw,
-            '000110': self._xorwf,
-        }[ins.opcode](ins)
+            'ADDFSR': self._addfsr,
+            'ADDLW': self._addlw,
+            'ADDWF': self._addwf,
+            'ADDWFC': self._addwfc,
+            'ANDLW': self._andlw,
+            'ANDWF': self._andwf,
+            'ASRF': self._asrf,
+            'BCF': self._bcf,
+            'BRA': self._bra,
+            'BRW': self._brw,
+            'BSF': self._bsf,
+            'BTFSC': self._btfsc,
+            'BTFSS': self._btfss,
+            'CALL': self._call,
+            'CALLW': self._callw,
+            'CLRF': self._clrf,
+            'CLRW': self._clrw,
+            'CLRWDT': self._clrwdt,
+            'COMF': self._comf,
+            'DECF': self._decf,
+            'DECFSZ': self._decfsz,
+            'GOTO': self._goto,
+            'INCF': self._incf,
+            'INCFSZ': self._incfsz,
+            'IORLW': self._iorlw,
+            'IORWF': self._iorwf,
+            'LSLF': self._lslf,
+            'LSRF': self._lsrf,
+            'MOVF': self._movf,
+            'MOVIWK': self._moviwk,
+            'MOVIWM': self._moviwm,
+            'MOVLB': self._movlb,
+            'MOVLP': self._movlp,
+            'MOVLW': self._movlw,
+            'MOVWF': self._movwf,
+            'MOVWIK': self._movwik,
+            'MOVWIM': self._movwim,
+            'NOP': self._nop,
+            'OPTION': self._option,
+            'RESET': self._reset,
+            'RETFIE': self._retfie,
+            'RETLW': self._retlw,
+            'RETURN': self._return,
+            'RLF': self._rlf,
+            'RRF': self._rrf,
+            'SLEEP': self._sleep,
+            'SUBLW': self._sublw,
+            'SUBWF': self._subwf,
+            'SUBWFB': self._subwfb,
+            'SWAPF': self._swapf,
+            'TRIS': self._tris,
+            'XORLW': self._xorlw,
+            'XORWF': self._xorwf,
+        }[ins.info.mnemonic](ins)
         
     # opcode implementations
     def _addfsr(self, ins):
@@ -687,7 +672,7 @@ class Pic:
         self.data['OPTION'] = self.wreg
 
     def _reset(self, ins):
-        self.reset(self.reg['NOT_RI'])
+        self.reset()
         
     def _retfie(self, ins):
         self.pop()
@@ -862,15 +847,30 @@ class Instruction:
 class Decoder:
     ''' Decodes and encodes instructions from/to 14 bit program words'''
         
-    def __init__(self, data):
+    def __init__(self, ins_data, inc_file):
         ''' parse instruction table and build lookup tables '''
         self.info_list = []
         self.mnemonic_dict = {}
 
-        for rec in data:
+        for rec in ins_data:
             info = InstructionInfo(rec)
             self.info_list.append(info)
             self.mnemonic_dict[info.mnemonic] = info
+
+        # load include file with reg definitions
+        self.load_inc_file(inc_file)
+
+    def load_inc_file(self, filename):
+        ''' load the register and config word definitions from .inc file and build a dict '''
+        
+        with open(filename) as fp:
+            self.reg = {}
+            for line in fp:
+                # STATUS EQU  H'0003'
+                m = re.search("(?i)^(\S+)\s+EQU\s+H'(\S+)'", line.strip())
+                if m:
+                    name, value = m.groups()
+                    self.reg[name] = int(value, 16)
 
     def decode(self, word):
         ''' return an Instruction consisting of info and dict of fields (b, d, f, n, m, k) '''
@@ -909,6 +909,85 @@ class Decoder:
         
         return Instruction(info, fields)
 
+    def assemble(self, source):
+        '''
+        Mini assembler.  Takes source code string
+        
+        [symbol]  [instruction [arg, arg, ...]]
+        
+        symbol if present must start in column 1. arg values may be symbols or predefined
+        register or bit names (STATUS, BSR, GIE, etc) or destination flags (F or W).  Case
+        is ignored.  Numeric values assume decimal radix.
+        
+        macro instructions:
+        ORG - defines value of pc: org 0x004
+        EQU - defines a symbolic constant: x equ 0x20
+        
+        symbol when not part of an EQU macro defines symbolic constant for current pc.  May
+        preface machine instruction, ORG macro or by itself
+        '''
+    
+        code = []
+        symtab = {}
+        pc = 0
+        
+        for line in source.splitlines():
+            m = re.search("(?i)(^\S+)?\s+(\S+)?\s+(.+)?", line)
+            if m:
+                # unpak parsed groups
+                sym, op, args = m.groups()
+                
+                op = op.upper() if op else ''
+                sym = sym.upper() if sym else ''
+                
+                # convert args into a list of values looking up symbols if needed
+                values = []
+                if args:
+                    for arg in args.upper().split(','):
+                        arg = arg.strip().upper()
+                        
+                        if arg.startswith('0X'):
+                            values.append(int(arg, 16))
+                        elif arg.isdecimal():
+                            values.append(int(arg))
+                        elif arg in self.reg:
+                            values.append(self.reg[arg])
+                        elif arg in symtab:
+                            values.append(symtab[arg])
+                        else:
+                            values.append(0)
+
+                if op == 'ORG':
+                    pc = values[0]
+                    if sym:
+                        symtab[sym] = pc
+                elif op == 'EQU':
+                    symtab[sym] = values[0]
+                else:
+                    # assign symbols to current pc
+                    if sym:
+                        symtab[sym] = pc
+                    if op:
+                        # get info about the instruction
+                        info = self.mnemonic_dict[op]
+    
+                        # handle special case of BRA instruction relative address
+                        if op == 'BRA':
+                            values[0] = (values[0] - (pc + 1)) & 0x1FF
+                            
+                        ins = Instruction(info, dict(zip(info.arg, values)))
+    
+                        # add instruction to code list
+                        if len(code) > pc:
+                            code[pc] = ins
+                        else:
+                            code.extend([None] * (pc - len(code)))
+                            code.append(ins)
+                        
+                        pc += 1
+    
+        return code, symtab
+
 
 def twos_complement(input_value, num_bits):
     '''Calculates a two's complement integer from the given input and num bits'''
@@ -916,106 +995,7 @@ def twos_complement(input_value, num_bits):
     return -(input_value & mask) + (input_value & ~mask)
 
 
-def code2(p, d):
-    code = [
-        d.encode('MOVLW', k=0x47),
-        d.encode('MOVWF', f=0x20),
-        d.encode('SWAPF', f=0x20, d=0),
-        
-        d.encode('GOTO', k=0x7FF),
-    ]
-    
-    p.load_program(0, code)
-    p.dump_program(range(len(code)))
-    p.run(verbose=False)
-    p.dump_data(range(0x20, 0x28))
-
-
-def test(p, d):
-    # this should use the decoder
-    p.load_from_file('test.hex')
-
-
-def assemble(decoder, source, reg):
-    '''
-    # assembler
-    sym    instruction    arg, arg
-    
-    sym can come from register dictionary or program dictionary
-    
-    macro instructions
-    org
-    equ
-    
-    assume decimal radix
-    '''
-
-    code = []
-    symtab = {}
-    pc = 0
-    
-    for line in source.splitlines():
-        m = re.search("(?i)(^\S+)?\s+(\S+)?\s+(.+)?", line)
-        if m:
-            # unpak parsed groups
-            sym, op, args = m.groups()
-            
-            op = op.upper() if op else ''
-            sym = sym.upper() if sym else ''
-            
-            # convert args into a list of values looking up symbols if needed
-            values = []
-            if args:
-                for arg in args.upper().split(','):
-                    if arg.startswith('0X'):
-                        values.append(int(arg, 16))
-                    elif arg.isdecimal():
-                        values.append(int(arg))
-                    elif arg in reg:
-                        values.append(reg[arg])
-                    elif arg in symtab:
-                        values.append(symtab[arg])
-                    else:
-                        values.append(0)
-            
-            if op == 'ORG':
-                pc = values[0]
-                if sym:
-                    symtab[sym] = pc
-            elif op == 'EQU':
-                symtab[sym] = values[0]
-            else:
-                # assign symbols to current pc
-                if sym:
-                    symtab[sym] = pc
-                if op:
-                    # get info about the instruction
-                    info = decoder.mnemonic_dict[op]
-
-                    # handle special case of BRA instruction relative address
-                    if op == 'BRA':
-                        values[0] = values[0] - (pc + 1)
-                        
-                    ins = Instruction(info, dict(zip(info.arg, values)))
-
-                    # add instruction to code list
-                    if len(code) > pc:
-                        code[pc] = ins
-                    else:
-                        code.extend([None] * (pc - len(code)))
-                        code.append(ins)
-                    
-                    pc += 1
-
-    return code, symtab
-
-
-if __name__ == '__main__':
-    decoder = Decoder(insdata.ENHMID)
-    p = Pic(decoder, 'p16f1826.inc')
- 
-    #code2(p, decoder)
-    
+def code3(p, d):
     source = '''
 x       equ 0x20
 reset   org 0x0000
@@ -1029,6 +1009,19 @@ test    org 0x0010
         bra reset
     '''
     
-    code, _ = assemble(decoder, source, p.reg)
+    code, _ = decoder.assemble(source)
     p.load_program(0, code)
     p.dump_program(range(len(code)))
+    
+
+def test(p, d):
+    # this should use the decoder
+    p.load_from_file('test.hex')
+
+
+if __name__ == '__main__':
+    decoder = Decoder(insdata.ENHMID, 'p16f1826.inc')
+    p = Pic(decoder)
+    
+    import test
+    test.test9(p, decoder)

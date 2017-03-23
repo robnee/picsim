@@ -13,7 +13,9 @@ def run(p, code, data, verbose=False):
     p.run(verbose)
     
     # determine data range to display
-    p.dump_data(range(min(data.values()), max(data.values()) + 1))
+    x = min(data.values()) & 0xFFF8
+    y = max(data.values())
+    p.dump_data(range(x, y + 1))
     
     
 def test1(p, d):
@@ -117,7 +119,7 @@ def test5(p, d):
         d.encode('MOVF', f=data['lsb_a'], d=0),
         d.encode('SUBWF', f=data['lsb_b'], d=1),
         d.encode('MOVF', f=data['msb_a'], d=0),
-        d.encode('BTFSS', f=p.reg['STATUS'], b=p.reg['C']),
+        d.encode('BTFSS', f=d.reg['STATUS'], b=d.reg['C']),
         d.encode('ADDLW', k=0x01),
         d.encode('SUBWF', f=data['msb_b'], d=1),
         
@@ -175,7 +177,53 @@ def test7(p, d):
     
     run(p, code, data)
     
+
 def test8(p, d):
+    ''' arithmatic shift tests '''
+    source = '''
+x    equ   0x20
+y    equ   0x21
+
+     movlw 0x01
+     movwf x
+     movlw 0x80
+     movwf y
+     asrf  x, f
+     asrf  y, f
+     
+     goto  0x7ff
+     '''
+     
+    code, data = d.assemble(source)
+    run(p, code, data)
+
+
+def test9(p, d):
+    ''' nested loop test '''
+    
+    source = '''
+x    equ    0x20
+y    equ    0x21
+
+     movlw  10
+     movwf  x
+
+l1   movlw  5
+     movwf  y
+l2   decfsz y, f
+     goto   l2
+     
+     decfsz x, f
+     bra    l1
+     
+     goto   0x7ff
+     '''
+     
+    code, data = d.assemble(source)
+    run(p, code, data)
+
+   
+def test20(p, d):
     ''' test FSR instructions and indirect registers '''
     pass
     
@@ -185,8 +233,8 @@ def test(p, d):
 
 
 if __name__ == '__main__':
-    d = pic.Decoder(insdata.ENHMID)
-    p = pic.Pic(d, 'p16f1826.inc')
+    d = pic.Decoder(insdata.ENHMID, 'p16f1826.inc')
+    p = pic.Pic(d)
 
     test1(p, d)
     test2(p, d)
@@ -195,3 +243,4 @@ if __name__ == '__main__':
     test5(p, d)
     test6(p, d)
     test7(p, d)
+    test8(p, d)
