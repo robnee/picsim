@@ -632,7 +632,7 @@ class Pic:
         if d == '0':
             self.data['WREG'] = (self.c << 7) | (v >> 1)
         else:
-            self.store(f, (self.c << 7) | (v >> 1)
+            self.store(f, (self.c << 7) | (v >> 1))
         self.c = v & 0x01
 
     def _sleep(self, fields):
