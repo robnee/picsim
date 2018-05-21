@@ -13,7 +13,7 @@ the gpr memory may be accessed as a continuous vector (excluding common ram) usi
 starting at 0x2000
 
 translate function resolves addresses into a bank, location and linear gpr address.  it also
-accepts addresses as register names which it looks up in a dictionary. 
+accepts addresses as register names which it looks up in a dictionary.
 
 __setitem__ and __getitem__ use the translation function to resolve addresses and then set
 or get a value from the correct region (sfr, gpr)
@@ -22,6 +22,7 @@ or get a value from the correct region (sfr, gpr)
 import array
 
 MAXRAM = 0x1000
+
 
 class DataMem():
     def __init__(self, maxram, reg):
@@ -43,17 +44,20 @@ class DataMem():
     def translate(self, address):
         ''' translate into bank, location, linear using traditional or linear data addressing '''
         
-        # allow location to be a register name or int address 
+        # allow location to be a register name or int address
         address = self.reg[address] if isinstance(address, str) else address
         
         # determine if this is a traditional (0x1000) or linear (0x2000) address
         if 0 <= address <= 0xFFF:
             bank, location = divmod(address, 0x80)
             if location <= 0x0B:
-                return 0, location, 0
-            elif location >= 0x70:
+                return 0, location, None
+            elif location < 0x20:
+                return bank, location, None
+            elif bank == 0 or location >= 0x70:
                 return 0, location, location - 0x20
-            # stack and shadow registers are annoyingly not in SFR space.  As a kludge move them there
+            # stack and shadow registers are annoyingly not in SFR space.  As a kludge move them
+            # there or they will be mapped to gpr
             elif bank == 31 and location >= 0x60:
                 return bank, location - 0x50, location
             else:
@@ -83,3 +87,14 @@ class DataMem():
             self.sfr[bank * 0x20 + location] = value & 0xFF
         else:
             self.gpr[linear] = value & 0xFF
+            
+    def dump(self, addresses):
+        for i, address in enumerate(addresses):
+            if i % 8 == 0:
+                print('{:04X}: '.format(address), end='')
+            print('{:02X} '.format(self[address]), end='')
+            if i % 8 == 7:
+                print()
+        else:
+            if i % 8 != 7:
+                print()

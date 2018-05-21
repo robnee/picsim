@@ -1,0 +1,212 @@
+# Doctest
+
+You can use a doctest file to run automated tests that are embedded in documentation or other comments. When you run this file (by tapping the ▷ button), the `doctest` module searches for pieces of text that look like interactive Python sessions, and executes those sessions to verify that they work exactly as shown.
+
+To test multi-line statements, use `...` as the prefix for the additional lines:
+
+    >>> def hello(name):
+    ...     return 'Hello ' + name
+    >>> hello('World')
+    'Hello World'
+
+You can use Markdown formatting (e.g. **bold**, *italic*) in the text surrounding the actual tests. While not strictly required, it is recommended that you indent code blocks (the test cases) with one tab or 4 spaces, so that they are recognized as code when you convert the Markdown to HTML. This also ensures that the code is syntax-highlighted in Pythonista.
+
+You can also run doctests that are contained in actual docstrings of a regular Python file (module). To do that, tap and hold the ▷ button, and select "Run Doctests".
+
+To learn more about doctests, please refer to the `doctest` module documentation.
+
+Due to bugs in Pythonista `os.getcwd` for the project must be added to sys.path
+    >>> import os, sys
+    >>> sys.path.append(os.getcwd())
+    
+    >>> import datamem
+    >>> d = datamem.DataMem(256, None)
+
+# This test mapping banked addresses to bank/location and linear gpr addresses
+    >>> d.translate(0x07)
+    (0, 7, None)
+    >>> d.translate(0x10)
+    (0, 16, None)
+    >>> d.translate(0x20)
+    (0, 32, 0)
+    >>> d.translate(0x50)
+    (0, 80, 48)
+    >>> d.translate(0x6F)
+    (0, 111, 79)
+    >>> d.translate(0x75)
+    (0, 117, 85)
+    >>> d.translate(0xa5)
+    (1, 37, 101)
+    >>> d.translate(0x125)
+    (2, 37, 181)
+    >>> d.translate(0x1ff)
+    (0, 127, 95)
+
+# tests indirect linear addressing
+    >>> d.translate(0x204f)
+    (0, 111, 79)
+    >>> d.translate(0x2050)
+    (1, 32, 96)
+    >>> d.translate(0x2055)
+    (1, 37, 101)
+
+# test register name addressing storage, retrieval, and dumping
+    >>> n = {'X': 0x92, 'Y': 0x95}
+    >>> d = datamem.DataMem(256, n)
+    >>> d[0x92] = 55
+    >>> d['X']
+    55
+    >>> d['Y'] = d['X']
+    >>> d[0x95]
+    55
+    >>> d.dump(range(0x90, 0x98))
+    0090: 00 00 37 00 00 37 00 00 
+
+    >>> print('88 88 ')
+    88 88 
+    
+# Tests encoding instructions
+    >>> import pic, insdata
+    >>> d = pic.Decoder(insdata.ENHMID, 'p16f1826.inc')
+    >>> d.encode('GOTO', k=0x004).to_bits()
+    '10100000000100'
+    >>> d.encode('NOP').to_bits()
+    '00000000000000'
+    >>> d.encode('MOVLW', k=0x10).to_bits()
+    '11000000010000'
+    >>> d.encode('MOVWF', f=0x30).to_bits()
+    '00000010110000'
+    >>> d.encode('DECFSZ', d=1, f=0x30).to_bits()
+    '00101110110000'
+    >>> d.encode('BRA', k=-2 & 0x1ff).to_bits()
+    '11001111111110'
+    >>> d.encode('CALL', k=0x00A).to_bits()
+    '10000000001010'
+    >>> d.encode('GOTO', k=0x7FF).to_bits()
+    '10111111111111'
+
+# test instruction decoding and formatting
+    >>> print(d.decode(0b00000001100001))
+    TRIS       0x01
+    >>> print(d.decode(0b01100110011101))
+    BTFSC      0x1d, 3
+    >>> print(d.decode(0b00100110010110))
+    COMF       0x16, F
+    >>> print(d.decode(0b11111000100101))
+    ADDLW      0x25
+    >>> print(d.decode(0b11000101011011))
+    ADDFSR     FSR1, 0x1b
+
+# test instruction execution
+    >>> import test
+    >>> p = pic.Pic(d)
+    >>> test.test1(p, d)
+    0000   GOTO       0x0004
+    0001   NOP       
+    0002   NOP       
+    0003   NOP       
+    0004   MOVLW      0x50
+    0005   MOVWF      0x20
+    0006   DECFSZ     0x20, F
+    0007   BRA        0x01FE
+    0008   CALL       0x000A
+    0009   GOTO       0x07FF
+    000A   MOVLW      0x45
+    000B   MOVWF      0x21
+    000C   ANDLW      0x00
+    000D   RETURN    
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:1 DC:0 C:0 W:00 CC:252
+    0020: 00 45 
+    >>> test.test2(p, d)
+    0000   MOVLW      0x47
+    0001   MOVWF      0x20
+    0002   SWAPF      0x20, W
+    0003   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:74 CC:5
+    0020: 47 00 
+    >>> test.test3(p, d)
+    0000   MOVLW      0x10
+    0001   IORWF      0x20, F
+    0002   BSF        0x20, 2
+    0003   BRA        0x0001
+    0004   BSF        0x20, 7
+    0005   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:10 CC:7
+    0020: 14 00 
+    >>> test.test4(p, d)
+    0000   MOVLW      0x10
+    0001   SUBLW      0x20
+    0002   MOVWF      0x20
+    0003   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:1 W:10 CC:5
+    0020: 10 00 
+    >>> test.test5(p, d)
+    0000   MOVLW      0x03
+    0001   MOVWF      0x22
+    0002   MOVLW      0x11
+    0003   MOVWF      0x23
+    0004   MOVLW      0x02
+    0005   MOVWF      0x20
+    0006   MOVLW      0x99
+    0007   MOVWF      0x21
+    0008   MOVF       0x21, W
+    0009   SUBWF      0x23, F
+    000A   MOVF       0x20, W
+    000B   BTFSS      0x03, 0
+    000C   ADDLW      0x01
+    000D   SUBWF      0x22, F
+    000E   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:1 DC:1 C:1 W:03 CC:16
+    0020: 02 99 00 78 
+    >>> test.test6(p, d)
+    0000   MOVLW      0x03
+    0001   MOVWF      0x22
+    0002   MOVLW      0x11
+    0003   MOVWF      0x23
+    0004   MOVLW      0x02
+    0005   MOVWF      0x20
+    0006   MOVLW      0x99
+    0007   MOVWF      0x21
+    0008   MOVF       0x21, W
+    0009   SUBWF      0x23, F
+    000A   MOVF       0x20, W
+    000B   SUBWFB     0x22, F
+    000C   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:1 DC:1 C:1 W:02 CC:14
+    0020: 02 99 00 78 
+    >>> test.test7(p, d)
+    0000   MOVLW      0x01
+    0001   MOVWF      0x20
+    0002   MOVLW      0x80
+    0003   MOVWF      0x21
+    0004   ASRF       0x20, F
+    0005   ASRF       0x21, F
+    0006   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:80 CC:8
+    0020: 00 C0 
+    >>> test.test8(p, d)
+    0000   MOVLW      0x01
+    0001   MOVWF      0x20
+    0002   MOVLW      0x80
+    0003   MOVWF      0x21
+    0004   ASRF       0x20, F
+    0005   ASRF       0x21, F
+    0006   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:80 CC:8
+    0020: 00 C0 
+    >>> test.test9(p, d)
+    0000   MOVLW      0x0A
+    0001   MOVWF      0x20
+    0002   MOVLW      0x05
+    0003   MOVWF      0x21
+    0004   DECFSZ     0x21, F
+    0005   GOTO       0x0004
+    0006   DECFSZ     0x20, F
+    0007   BRA        0x01FA
+    0008   GOTO       0x07FF
+    PC:07FF SP:00 BS:00 TO:0 PD:0 Z:0 DC:0 C:0 W:05 CC:193
+    0000: 00 00 FF 00 00 00 00 00 
+    0008: 00 05 00 00 00 00 00 00 
+    0010: 00 00 00 00 00 00 00 00 
+    0018: 00 00 00 00 00 00 00 00 
+    0020: 00 00 
