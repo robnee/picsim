@@ -25,11 +25,9 @@ class Pic:
         ''' init class with table of instruction set data '''
         
         self.stack = array.array('H')
+        self.cycles = array.array('L')
         self.data = datamem.DataMem(256, core.reg)
         self.clear()
-
-        # cycle counter
-        self.cycles = 0
 
         # program counter high byte
         self.pch = 0
@@ -40,12 +38,13 @@ class Pic:
         ''' clear memory '''
         # special function registers
         self.prog = [None for i in range(MAXROM)]
+        # cycle counts
+        self.cycles = [0 for i in range(MAXROM)]
         # stack
         self.stack = [0 for i in range(MAXSTACK)]
 
         self.data.clear()
-        
-        self.cycles = 0
+
         self.pch = 0
 
     def load_program(self, address, words):
@@ -130,6 +129,11 @@ class Pic:
         for address in address_list:
             print('{:04X}  '.format(address), self.prog[address])
 
+    def dump_profile(self, address_list):
+        ''' dump program memory '''
+        for address in address_list:
+            print('{:04X}   {:20} {:4}'.format(address, str(self.prog[address]), self.cycles[address]))
+
     def dump_data(self, addresses):
         self.data.dump(addresses)
 
@@ -138,9 +142,18 @@ class Pic:
         print('PC:{:04X} SP:{:02X} BS:{:02X}'.format(self.pc, self.stkptr, self.bsr), end='')
         
         print(' TO:{} PD:{} Z:{} DC:{} C:{}'.format(self.get_bit('STATUS', 'NOT_TO'), self.get_bit('STATUS', 'NOT_PD'), self.z, self.dc, self.c), end='')
-        
-        print(' W:{:02X} CC:{:d}'.format(self.wreg, self.cycles))
-        
+
+        print(' W:{:02X} CC:{:d}'.format(self.wreg, self.total_cycles()))
+
+    def inc_cycles(self, cycles):
+        self.cycles[self.ins_pc] += cycles
+
+    def total_cycles(self):
+        total = 0
+        for c in self.cycles:
+            total += c
+        return total
+
     @property
     def pc(self):
         ''' get the value of the program counter '''
@@ -329,9 +342,10 @@ class Pic:
         if verbose:
             print('{:04X}  '.format(self.pc), ins)
 
-        self.cycles += 1
-        self.pc += 1
-        
+        self.ins_pc, self.pc = self.pc, self.pc + 1
+        cycles = ins.info.cycles.split(',')[0]
+        self.inc_cycles(int(cycles))
+
         self.dispatch(ins)
 
     def dispatch(self, ins):
@@ -464,11 +478,9 @@ class Pic:
 
     def _bra(self, ins):
         self.pc += twos_complement(ins.k, 9)
-        self.cycles += 1
 
     def _brw(self, ins):
         self.pc += self.wreg
-        self.cycles += 1
 
     def _bsf(self, ins):
         f = ins.f
@@ -478,22 +490,20 @@ class Pic:
     def _btfsc(self, ins):
         if not self.load(ins.f) & (1 << ins.b):
             self.pc += 1
-            self.cycles += 1
+            self.inc_cycles(1)
 
     def _btfss(self, ins):
         if self.load(ins.f) & (1 << ins.b):
             self.pc += 1
-            self.cycles += 1
+            self.inc_cycles(1)
 
     def _call(self, ins):
         self.push()
         self.pc = (self.pclath & 0b01111000 << 8) | ins.k
-        self.cycles += 1
 
     def _callw(self, ins):
         self.push()
         self.pc = (self.pclath & 0b01111111 << 8) | self.wreg
-        self.cycles += 1
 
     def _clrf(self, ins):
         self.store(ins.f, 0)
@@ -533,11 +543,10 @@ class Pic:
             self.store(f, v)
         if not v:
             self.pc += 1
-            self.cycles += 1
+            self.inc_cycles(1)
 
     def _goto(self, ins):
         self.pc = (self.pclath & 0b01111000 << 8) | ins.k
-        self.cycles += 1
 
     def _incf(self, ins):
         f = ins.f
@@ -557,7 +566,7 @@ class Pic:
             self.store(f, v)
         if not v:
             self.pc += 1
-            self.cycles += 1
+            self.inc_cycles(1)
 
     def _iorlw(self, ins):
         v = self.wreg | ins.k
@@ -677,16 +686,13 @@ class Pic:
     def _retfie(self, ins):
         self.pop()
         self.set_bit('INTCON', 'GIE')
-        self.cycles += 1
 
     def _retlw(self, ins):
         self.wreg = ins.k
         self.pop()
-        self.cycles += 1
 
     def _return(self, ins):
         self.pop()
-        self.cycles += 1
 
     def _rlf(self, ins):
         f = ins.f
@@ -732,8 +738,8 @@ class Pic:
 
     def _subwfb(self, ins):
         f = ins.f
-        v = self.load(f) + ((-self.wreg) & 0xFF) + ~self.c
-        r = (self.load(f) & 0x0F) + ((-self.wreg) & 0x0F) + ~self.c
+        v = self.load(f) + ((-self.wreg) & 0xFF) - (1 - self.c)
+        r = (self.load(f) & 0x0F) + ((-self.wreg) & 0x0F) + (1 - self.c)
         if ins.d == 0:
             self.wreg = v
         else:
@@ -932,30 +938,36 @@ class Decoder:
         pc = 0
         
         for line in source.splitlines():
-            m = re.search("(?i)(^\S+)?\s+(\S+)?\s+(.+)?", line)
+            m = re.search("(?i)(^\S+)?(\s+\S+)?(\s+.+)?", line)
             if m:
                 # unpak parsed groups
                 sym, op, args = m.groups()
-                
-                op = op.upper() if op else ''
-                sym = sym.upper() if sym else ''
+
+                # kludge because regex isn't quite right
+                #if not op and args:
+                #    op, args = args, None
+
+                op = op.upper().strip() if op else ''
+                sym = sym.upper().strip() if sym else ''
                 
                 # convert args into a list of values looking up symbols if needed
                 values = []
                 if args:
                     for arg in args.upper().split(','):
+                        # handle arg by first treating as numeric
                         arg = arg.strip().upper()
-                        
-                        if arg.startswith('0X'):
-                            values.append(int(arg, 16))
-                        elif arg.isdecimal():
-                            values.append(int(arg))
-                        elif arg in self.reg:
-                            values.append(self.reg[arg])
-                        elif arg in symtab:
-                            values.append(symtab[arg])
-                        else:
-                            values.append(0)
+                        try:
+                            if arg.startswith('0X'):
+                                values.append(int(arg, 16))
+                            else:
+                                values.append(to2comp(int(arg), 8))
+                        except ValueError:
+                            if arg in self.reg:
+                                values.append(self.reg[arg])
+                            elif arg in symtab:
+                                values.append(symtab[arg])
+                            else:
+                                values.append(0)
 
                 if op == 'ORG':
                     pc = values[0]
@@ -970,13 +982,12 @@ class Decoder:
                     if op:
                         # get info about the instruction
                         info = self.mnemonic_dict[op]
-    
+
                         # handle special case of BRA instruction relative address
                         if op == 'BRA':
                             values[0] = (values[0] - (pc + 1)) & 0x1FF
                             
                         ins = Instruction(info, dict(zip(info.arg, values)))
-    
                         # add instruction to code list
                         if len(code) > pc:
                             code[pc] = ins
@@ -985,8 +996,16 @@ class Decoder:
                             code.append(ins)
                         
                         pc += 1
-    
+
+        print(symtab)
         return code, symtab
+
+
+def to2comp(input_value, num_bits):
+    if input_value < 0:
+        return 2**num_bits + input_value
+    else:
+        return input_value
 
 
 def twos_complement(input_value, num_bits):
@@ -1012,16 +1031,144 @@ test    org 0x0010
     code, _ = decoder.assemble(source)
     p.load_program(0, code)
     p.dump_program(range(len(code)))
+
+
+def code4(p, d):
+    source = '''
+x       equ 0x20
+y       equ 0x21
+c       equ 0x22
+reset   org 0x0000
+        movlw 0x23
+        movwf x
+        movlw 0x00
+        movwf y
+        
+        movlw 0x22
+        subwf x, f
+        movlw 0x00
+        subwfb y, f
+        
+        goto 0x7ff
+    '''
     
+    code, data = decoder.assemble(source)
+    p.load_program(0, code)
+    p.dump_program(range(len(code)))
+    
+    p.run(verbose=True)
+    
+    # determine data range to display
+    x = min(data.values()) & 0xFFF8
+    y = max(data.values())
+    p.dump_data(range(x, y + 1))
+
+
+def code5(p, d):
+    source = '''
+x       equ 0x20
+y       equ 0x21
+c       equ 0x22
+reset   org 0x0000
+        movlw 0x23
+        movwf x
+        movlw 0x00
+        movwf y
+        
+        movlw 0x23
+        subwf x, f
+        movlw 0x00
+        subwfb y, f
+        
+        goto 0x7ff
+    '''
+    
+    code, data = decoder.assemble(source)
+    p.load_program(0, code)
+    p.dump_program(range(len(code)))
+    
+    p.run(verbose=True)
+    
+    # determine data range to display
+    x = min(data.values()) & 0xFFF8
+    y = max(data.values())
+    p.dump_data(range(x, y + 1))
+
+
+def code6(p, d):
+    source = '''
+x       equ 0x20
+y       equ 0x21
+c       equ 0x22
+reset   org 0x0000
+        movlw 0x23
+        movwf x
+        movlw 0x00
+        movwf y
+        
+        movlw 0x24
+        subwf x, f
+        movlw 0x00
+        subwfb y, f
+        
+        goto 0x7ff
+    '''
+    
+    code, data = decoder.assemble(source)
+    p.load_program(0, code)
+    p.dump_program(range(len(code)))
+    
+    p.run(verbose=True)
+    
+    # determine data range to display
+    x = min(data.values()) & 0xFFF8
+    y = max(data.values())
+    p.dump_data(range(x, y + 1))
+
 
 def test(p, d):
     # this should use the decoder
     p.load_from_file('test.hex')
 
 
+def test10(p, d):
+    ''' nested stable timing loop '''
+    
+    source = '''
+x    equ    0x20
+y    equ    0x21
+
+     movlw  0x02
+     movwf  x
+
+     movlw  0x00
+     movwf  y
+loop   
+     movlw  -1
+     
+     addwf  x, f
+     btfsc  STATUS, C
+     clrw   x
+     
+     addwf  y, f
+     btfsc  STATUS, C
+     clrw   y
+     
+     iorwf	x, w
+     iorwf	y, w
+     btfss	STATUS, Z
+     goto   loop
+     
+     goto   0x7ff
+     '''
+     
+    code, data = d.assemble(source)
+    run(p, code, data)
+
+
 if __name__ == '__main__':
     decoder = Decoder(insdata.ENHMID, 'p16f1826.inc')
     p = Pic(decoder)
-    
+
     import test
     test.test9(p, decoder)

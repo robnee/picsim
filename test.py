@@ -17,6 +17,8 @@ def run(p, code, data, verbose=False):
     y = max(data.values())
     p.dump_data(range(x, y + 1))
     
+    p.dump_profile(range(len(code)))
+    
     
 def test1(p, d):
     ''' Simple countdown loop'''
@@ -126,7 +128,7 @@ def test5(p, d):
         d.encode('GOTO', k=0x7FF),
     ]
     
-    run(p, code, data)
+    run(p, code, data, verbose=True)
     
     
 def test6(p, d):
@@ -155,7 +157,7 @@ def test6(p, d):
         d.encode('GOTO', k=0x7FF),
     ]
     
-    run(p, code, data)
+    run(p, code, data, verbose=True)
 
 
 def test7(p, d):
@@ -222,11 +224,48 @@ l2   decfsz y, f
     code, data = d.assemble(source)
     run(p, code, data)
 
-   
+
+def test10(p, d):
+    ''' nested stable timing loop '''
+    
+    source = '''
+x    equ    0x20
+y    equ    0x21
+
+
+     movlw  0x02
+     movwf  x
+
+     movlw  0x00
+     movwf  y
+loop 
+     movlw  -1
+     
+     addwf  x, f
+     btfsc  STATUS, C
+     clrw   x
+     
+     addwf  y, f
+     btfsc  STATUS, C
+     clrw   y
+     
+     iorwf	x, w
+     iorwf	y, w
+     btfss	STATUS, Z
+     goto   loop
+     
+     goto   0x7ff
+     '''
+     
+    code, data = d.assemble(source)
+    run(p, code, data)
+
+
 def test20(p, d):
     ''' test FSR instructions and indirect registers '''
     pass
-    
+
+   
 def test(p, d):
     # this should use the decoder
     p.load_from_file('test.hex')
@@ -236,6 +275,7 @@ if __name__ == '__main__':
     d = pic.Decoder(insdata.ENHMID, 'p16f1826.inc')
     p = pic.Pic(d)
 
+    '''   
     test1(p, d)
     test2(p, d)
     test3(p, d)
@@ -244,3 +284,6 @@ if __name__ == '__main__':
     test6(p, d)
     test7(p, d)
     test8(p, d)
+    '''
+    test5(p, d)
+    test6(p, d)
